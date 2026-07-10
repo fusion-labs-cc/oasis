@@ -1,0 +1,32 @@
+# Python
+*.pyc
+__pycache__/
+/oasis/
+
+# Bundled Windows runtime (produced by build-runtime-win.sh, shipped in the zip,
+# never committed -- so `git pull` auto-updates only source, never the runtime)
+/python/
+/bin/
+/oasis-portal-win64.zip
+
+# Media & temp
+*.mp4
+*.jpg
+*.m3u8
+*.DS_Store
+
+# Chrome
+chromedriver*
+
+# Aider
+.aider*
+
+# Node
+node_modules/
+.next/
+
+# Misc
+queue.txt
+
+# SQLite
+*.db

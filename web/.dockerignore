@@ -1,0 +1,8 @@
+node_modules
+.next
+.env.local
+*.DS_Store
+AGENTS.md
+CLAUDE.md
+README.md
+tsconfig.tsbuildinfo

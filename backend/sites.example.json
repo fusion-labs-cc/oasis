@@ -1,0 +1,46 @@
+{
+  "id": "example",
+  "name": "Example Site",
+  "display_domain": "example.com",
+  "_comment": "Adapter schema. Copy this into backend/sites/<yoursite>.json and fill in selectors for the site you want to read. Files in backend/sites/ are gitignored and never shipped.",
+  "domains": [
+    "example.com"
+  ],
+  "domain_prefixes": [],
+  "user_agent": "",
+  "title_selectors": [
+    "h1",
+    "title"
+  ],
+  "title_suffix_strip": [
+    " - Example Site"
+  ],
+  "tag_selectors": [
+    "a.tag"
+  ],
+  "headers": {
+    "Referer": "{page_url}"
+  },
+  "driver": {
+    "performance_log": false,
+    "stealth": false
+  },
+  "wait": {
+    "seconds": 2,
+    "css": "h1",
+    "timeout": 15
+  },
+  "m3u8": {
+    "regexes": [
+      "https?://[^\\s\"']+\\.m3u8[^\\s\"']*"
+    ],
+    "use_performance_log": false,
+    "retry": {
+      "wait_seconds": 5,
+      "click_selectors": [
+        ".play-button"
+      ],
+      "click_wait_seconds": 3
+    }
+  }
+}

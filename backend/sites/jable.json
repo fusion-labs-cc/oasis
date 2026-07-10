@@ -1,0 +1,29 @@
+{
+  "id": "jable",
+  "name": "Jable",
+  "domains": [
+    "jable.tv"
+  ],
+  "title_selectors": [
+    "div.header-left h4",
+    "h4",
+    "h1"
+  ],
+  "title_suffix_strip": [
+    " - Jable.tv"
+  ],
+  "tag_selectors": [
+    "h5.tags a"
+  ],
+  "driver": {},
+  "wait": {
+    "seconds": 2,
+    "css": "h4, h1",
+    "timeout": 15
+  },
+  "m3u8": {
+    "regexes": [
+      "https://.+m3u8"
+    ]
+  }
+}

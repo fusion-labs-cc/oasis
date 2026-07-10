@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f1211;
+  --foreground: #f8fafc;
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface-base: #0f1211;
+  --color-surface-elevated: #16191a;
+  --color-surface-highest: #1c2021;
+  --color-accent: #10b981;
+  --color-accent-hover: #34d399;
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #94a3b8;
+  --color-text-tertiary: #64748b;
+  --color-border-hairline: rgba(255, 255, 255, 0.05);
+
+  --font-sans: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Anti-flash for the OASIS gate: authorized visitors (flagged pre-paint by the
+   inline script in layout head) skip the entrance. This only applies until
+   React hydrates and adds `oasis-hydrated`, after which React alone controls
+   the gate's visibility (so a later disconnect/failure can re-show it). */
+html.oasis-authed:not(.oasis-hydrated) .oasis-gate {
+  display: none !important;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.3);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+/* Tactile physical card hover effect */
+@utility tactile-card {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  &:hover {
+    transform: translateY(-4px) scale(1.015);
+    box-shadow: 0 20px 25px -5px rgba(16, 185, 129, 0.05), 0 8px 10px -6px rgba(16, 185, 129, 0.05);
+    border-color: rgba(16, 185, 129, 0.3);
+  }
+}
+
+/* Dialog Overlay & Animation */
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+dialog {
+  opacity: 0;
+  transform: scale(0.95) translateY(12px);
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              display 0.3s cubic-bezier(0.16, 1, 0.3, 1) allow-discrete;
+}
+
+dialog[open] {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+@starting-style {
+  dialog[open] {
+    opacity: 0;
+    transform: scale(0.95) translateY(12px);
+  }
+}
+
+/* Custom Plyr styling */
+.plyr {
+  --plyr-color-main: #10b981;
+  --plyr-video-control-color-hover: #34d399;
+  --plyr-control-toggle-checked-background: #10b981;
+  --plyr-video-controls-background: linear-gradient(rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.85));
+  --plyr-video-control-background-hover: rgba(255, 255, 255, 0.08);
+  --plyr-range-thumb-height: 12px;
+  --plyr-range-track-height: 4px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* Theater mode: full-bleed width, cap height to viewport */
+.theater .plyr {
+  margin-inline: auto;
+  max-width: calc((100vh - 8rem) * 16 / 9);
+  border-radius: 0;
+}
+

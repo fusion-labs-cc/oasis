@@ -1,0 +1,55 @@
+OASIS — Third-Party Components and Licenses
+===========================================
+
+The Windows portal bundle (oasis-portal-win64.zip) redistributes two
+third-party binaries. This file records their origin and license terms so the
+distribution complies with them. Neither is authored by the OASIS project.
+
+
+-------------------------------------------------------------------------------
+1. FFmpeg  (bin/ffmpeg.exe)
+-------------------------------------------------------------------------------
+Purpose : Merging HLS/TS segments and transcoding downloaded video to MP4.
+Source  : Static Windows build from gyan.dev
+          https://www.gyan.dev/ffmpeg/builds/  ("release-essentials")
+Upstream: https://ffmpeg.org
+License : GNU General Public License, version 3 (GPL-3.0).
+          The gyan.dev "essentials" build is compiled with GPL-licensed
+          components (e.g. libx264 / libx265), so the resulting binary is
+          covered by the GPL, not the LGPL.
+
+Compliance notes:
+  * FFmpeg is redistributed unmodified.
+  * The corresponding source code is publicly available from ffmpeg.org and
+    from the gyan.dev build page above.
+  * Written offer: the exact source and build configuration used to produce
+    this binary can be obtained by running `ffmpeg -version` (it prints the
+    version and the full `configuration:` line), then fetching the matching
+    tagged source from https://git.ffmpeg.org/ffmpeg.git or https://ffmpeg.org.
+  * The full text of the GNU GPL v3 (plus component notices) ships next to the
+    binary at bin/ffmpeg-LICENSE.txt, and is also at
+    https://www.gnu.org/licenses/gpl-3.0.txt
+
+To record the exact bundled version, run `bin/ffmpeg.exe -version` and paste the
+first two lines here when cutting a release.
+
+
+-------------------------------------------------------------------------------
+2. CPython (embeddable distribution)  (python/)
+-------------------------------------------------------------------------------
+Purpose : Runs the FastAPI backend and downloader without a system Python.
+Source  : Official "Windows embeddable package (amd64)" from python.org
+          https://www.python.org/downloads/windows/
+Upstream: https://www.python.org
+License : Python Software Foundation License (PSF), a permissive license that
+          explicitly permits redistribution.
+
+Compliance notes:
+  * The runtime is redistributed unmodified.
+  * The full PSF license text ships alongside it at python/LICENSE.txt.
+
+
+-------------------------------------------------------------------------------
+Everything else in this repository is OASIS's own source code, covered by the
+project LICENSE at the repository root.
+-------------------------------------------------------------------------------
