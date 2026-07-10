@@ -112,7 +112,13 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
         # Public repo: pull the current branch from origin. --ff-only never
         # creates a merge commit or clobbers local edits.
         $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
-        $Out = (git pull --ff-only origin $Branch 2>&1 | Out-String)
+        # git writes normal progress ("From https://...") to stderr, not just
+        # real errors. If PowerShell sees that stderr it wraps each line in an
+        # ErrorRecord and paints it red (NativeCommandError) even though the pull
+        # succeeded. Let cmd.exe merge stderr into stdout first, so PowerShell
+        # only ever receives plain strings -- no ErrorRecords, no red text. The
+        # real success/failure signal is the exit code, checked below.
+        $Out = (cmd /c "git pull --ff-only origin $Branch 2>&1") | Out-String
         Write-Host $Out.TrimEnd()
         if ($LASTEXITCODE -eq 0) {
             Write-Host "  [SUCCESS] Project is up to date." -ForegroundColor Green
