@@ -566,7 +566,11 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent animate-pulse">
                         <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
-                        下載中...
+                        {task.queued
+                          ? "排隊中..."
+                          : typeof task.progress === "number"
+                            ? `下載中 ${task.progress}%`
+                            : "下載中..."}
                       </span>
                       {typeof task.videoId === "number" && (
                         <button
@@ -612,6 +616,22 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                   )}
                 </div>
 
+                {task.status === "downloading" && (
+                  <div className="mt-0.5">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-highest">
+                      {task.queued ? (
+                        // No determinate progress yet — indeterminate shimmer.
+                        <div className="h-full w-1/3 animate-pulse rounded-full bg-accent/40" />
+                      ) : (
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+                          style={{ width: `${task.progress ?? 0}%` }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {(task.status === "success" || task.status === "downloading") && (
                   <div className="mt-1 flex items-center justify-between gap-2 border-t border-border-hairline/50 pt-1.5">
                     <div className="flex items-center gap-2 min-w-0">
@@ -628,7 +648,15 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                       </span>
                     </div>
                     <span className="text-[9px] font-semibold text-text-tertiary shrink-0">
-                      {task.status === "downloading" ? "📥 下載中" : task.download ? "📥 下載完成" : "🔍 僅 analysis"}
+                      {task.status === "downloading"
+                        ? task.queued
+                          ? "📥 排隊中"
+                          : typeof task.progress === "number"
+                            ? `📥 下載中 ${task.progress}%`
+                            : "📥 下載中"
+                        : task.download
+                          ? "📥 下載完成"
+                          : "🔍 僅分析"}
                     </span>
                   </div>
                 )}

@@ -40,7 +40,7 @@ def _make_session(dl_headers: dict) -> requests.Session:
     return session
 
 
-def scrape(key, iv, folderPath, remaining, lock, session, url):
+def scrape(key, iv, folderPath, remaining, lock, session, total, progress_cb, url):
     # Bail out immediately if a cancel was requested — avoids network I/O and
     # writing into a folder that the cancel handler may already have removed.
     if _stop_event.is_set():
@@ -50,6 +50,8 @@ def scrape(key, iv, folderPath, remaining, lock, session, url):
     if os.path.exists(saveName):
         with lock:
             remaining.discard(url)
+            left = len(remaining)
+        _report_progress(progress_cb, total, left)
         return True
     try:
         response = session.get(url, timeout=15)
@@ -68,6 +70,7 @@ def scrape(key, iv, folderPath, remaining, lock, session, url):
                 remaining.discard(url)
                 left = len(remaining)
             print(f'\r已完成: {url.split("/")[-1]}, 剩餘 {left} 個   ', end='', flush=True)
+            _report_progress(progress_cb, total, left)
             return True
         print(f'\n⚠️ HTTP {response.status_code}: {url}')
     except Exception as e:
@@ -78,7 +81,19 @@ def scrape(key, iv, folderPath, remaining, lock, session, url):
     return False
 
 
-def prepareCrawl(key, iv, folderPath, tsList, dl_headers=None):
+def _report_progress(progress_cb, total, left):
+    """Invoke the caller's progress callback with (completed, total). Any
+    failure inside the callback is swallowed so a flaky progress sink never
+    breaks the download itself."""
+    if not progress_cb or not total:
+        return
+    try:
+        progress_cb(total - left, total)
+    except Exception:
+        pass
+
+
+def prepareCrawl(key, iv, folderPath, tsList, dl_headers=None, progress_cb=None):
     if dl_headers is None:
         dl_headers = default_headers
     reset_stop()
@@ -88,19 +103,20 @@ def prepareCrawl(key, iv, folderPath, tsList, dl_headers=None):
 
     session = _make_session(dl_headers)
     lock = threading.Lock()
-    _startCrawl(key, iv, folderPath, remaining, lock, session, tsList)
+    _startCrawl(key, iv, folderPath, remaining, lock, session, tsList, progress_cb)
 
     elapsed = (time.time() - start_time) / 60
     print(f'\n花費 {elapsed:.2f} 分鐘 爬取完成 !')
 
 
-def _startCrawl(key, iv, folderPath, remaining, lock, session, tsList):
+def _startCrawl(key, iv, folderPath, remaining, lock, session, tsList, progress_cb=None):
+    total = len(tsList)
     round_num = 0
     while remaining and not _stop_event.is_set():
         pending = list(remaining)
         with concurrent.futures.ThreadPoolExecutor(max_workers=WORKERS) as executor:
             executor.map(
-                partial(scrape, key, iv, folderPath, remaining, lock, session),
+                partial(scrape, key, iv, folderPath, remaining, lock, session, total, progress_cb),
                 pending,
             )
         round_num += 1

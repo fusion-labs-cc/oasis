@@ -39,6 +39,13 @@ def create_tables():
         conn.execute("ALTER TABLE videos ADD COLUMN play_count INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # Column already exists
+    # Add download_pending column if it doesn't exist (safe migration).
+    # Marks a video whose download was requested but hasn't completed, so a
+    # server restart can re-queue it instead of silently dropping it.
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN download_pending INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     conn.close()
     print(f'✅ 資料庫已初始化: {DB_PATH}')

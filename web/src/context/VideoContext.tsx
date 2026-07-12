@@ -132,6 +132,15 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
           // way a single fetch reconciles is_downloading / video_path.
           if (res.status === "completed" || res.status === "idle") {
             await syncVideo(id);
+          } else {
+            // Still "downloading" / "queued": push the live percent + queue state
+            // onto the record so cards and the detail page update in place.
+            updateVideo(id, {
+              is_downloading: true,
+              download_queued: res.status === "queued",
+              download_progress:
+                typeof res.progress === "number" ? res.progress : null,
+            });
           }
         } catch {
           // Transient error; try again on the next tick.
@@ -142,7 +151,7 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
       active = false;
       clearInterval(timer);
     };
-  }, [anyDownloading, status, syncVideo]);
+  }, [anyDownloading, status, syncVideo, updateVideo]);
 
   return (
     <VideoContext.Provider

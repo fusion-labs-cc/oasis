@@ -270,6 +270,32 @@ def clear_video_path(video_id: int):
     return get_video_by_id(video_id)
 
 
+def set_download_pending(video_id: int, pending: bool):
+    """Mark (or clear) a video as having a download queued/in-progress. Persisted
+    so a server restart can resume it instead of dropping it silently."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE videos SET download_pending = ? WHERE id = ?",
+        (1 if pending else 0, video_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_pending_downloads() -> list:
+    """Return (id, url) for every video whose download was requested but never
+    completed (pending flag set and no local file recorded yet). Used on startup
+    to rebuild the download queue."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, url FROM videos "
+        "WHERE download_pending = 1 AND (video_path IS NULL OR video_path = '') "
+        "ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return [(r['id'], r['url']) for r in rows]
+
+
 def update_video_tags(video_id: int, tags: list):
     """Replace the tag list for a video and return the updated record (or None)."""
     clean = []
