@@ -52,15 +52,16 @@ jobs:
           $lic = Get-ChildItem ffmpeg_extracted -Recurse -Filter LICENSE* | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$bin/ffmpeg-LICENSE.txt" }
 
-      - name: Package zip
-        shell: pwsh
-        run: Compress-Archive -Path dist/oasis-backend/* -DestinationPath oasis-backend-win64.zip
-
+      # Upload the onedir folder itself (not a pre-made zip). upload-artifact
+      # always zips its input, so uploading a zip would nest zip-in-zip on
+      # download; uploading the folder yields a single clean zip. Windows has no
+      # exec bit or symlinks to lose, so the raw folder round-trips fine. The
+      # release job produces the final distributable zip.
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: oasis-backend-win64
-          path: oasis-backend-win64.zip
+          path: dist/oasis-backend
 
   build-macos:
     if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["both","macos"]'), github.event.inputs.platform) }}
@@ -116,6 +117,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # The Windows artifact is the raw onedir folder; zip it here into the
+      # final distributable (contents at the root). The macOS artifact is
+      # already a ditto zip that preserves perms/symlinks, so it passes through.
+      - name: Zip the Windows build
+        run: (cd artifacts/oasis-backend-win64 && zip -qr ../oasis-backend-win64.zip .)
 
       - name: Publish Release
         uses: softprops/action-gh-release@v2
