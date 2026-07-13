@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Database setup script for oasis.
-Creates the SQLite database and videos table if they don't exist.
+Database setup for oasis.
+create_tables() is called by the API on startup to create the SQLite database
+and videos table if they don't exist (safe to call repeatedly).
 """
 
 import os
@@ -49,11 +50,3 @@ def create_tables():
     conn.commit()
     conn.close()
     print(f'✅ 資料庫已初始化: {DB_PATH}')
-
-
-def main():
-    create_tables()
-
-
-if __name__ == '__main__':
-    main()

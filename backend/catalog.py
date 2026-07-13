@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Oasis Download & Catalog Script
+Oasis scraping + SQLite catalog logic.
 
-Usage:
-    python catalog.py <URL> [<URL2> ...]
-    python catalog.py --no-download <URL>
-    python catalog.py --list
-    python catalog.py --search-actress "小倉由菜"
-    python catalog.py --search-code "START-344"
+Importable module consumed by the FastAPI backend (api.py): URL analysis and
+download (process_url), the video queries, and the manual/import/export helpers.
 """
 
-import argparse
 import os
 import re
 import sys
@@ -210,16 +205,6 @@ def list_all_videos():
     conn = get_connection()
     rows = [_row_to_dict(r) for r in conn.execute(
         "SELECT * FROM videos ORDER BY created_at DESC"
-    )]
-    conn.close()
-    return rows
-
-
-def search_by_actress(name: str):
-    conn = get_connection()
-    rows = [_row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM videos WHERE actress LIKE ? ORDER BY created_at DESC",
-        (f'%{name}%',)
     )]
     conn.close()
     return rows
@@ -517,7 +502,6 @@ def process_url(url: str, skip_download: bool = False):
         print(f'✅ 已儲存至資料庫 (ID: {vid})')
     except Exception as e:
         print(f'❌ 資料庫寫入失敗: {e}')
-        print('   提示: 請確認已執行 db_setup.py 初始化資料庫')
         return None
 
     # Step 5: Download video (optional) — runs AFTER DB insert
@@ -692,147 +676,3 @@ def import_videos(records: list) -> dict:
         imported += 1
 
     return {'imported': imported, 'skipped': skipped}
-
-
-def print_video_table(rows):
-    """Pretty-print a list of video records."""
-    if not rows:
-        print('（無資料）')
-        return
-
-    print(f'\n{"片號":<12} {"女優":<12} {"標籤":<30} {"標題":<40}')
-    print('-' * 94)
-    for r in rows:
-        code = r.get('code', '')
-        actress = r.get('actress', '') or ''
-        tags_str = ', '.join(r.get('tags', []) or [])
-        title = (r.get('title', '') or '')[:38]
-        print(f'{code:<12} {actress:<12} {tags_str:<30} {title:<40}')
-    print(f'\n共 {len(rows)} 筆資料')
-
-
-QUEUE_FILE = os.path.join(PROJECT_ROOT, 'queue.txt')
-
-
-def queue_add(urls: list[str]):
-    with open(QUEUE_FILE, 'a', encoding='utf-8') as f:
-        for url in urls:
-            f.write(url.strip() + '\n')
-    print(f'✅ 已加入佇列 {len(urls)} 個 URL（{QUEUE_FILE}）')
-
-
-def queue_load() -> list[str]:
-    if not os.path.exists(QUEUE_FILE):
-        return []
-    with open(QUEUE_FILE, encoding='utf-8') as f:
-        return [line.strip() for line in f if line.strip()]
-
-
-def queue_remove(url: str):
-    urls = queue_load()
-    with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
-        for u in urls:
-            if u != url.strip():
-                f.write(u + '\n')
-
-
-# -- CLI entry point ------------------------------------------------------------
-
-def main():
-    parser = argparse.ArgumentParser(
-        description='Oasis 影片下載 & 分類入庫工具'
-    )
-    parser.add_argument('urls', nargs='*', help='影片 URL(s)')
-    parser.add_argument('--no-download', action='store_true',
-                        help='僅取得資訊並入庫，不下載影片')
-    parser.add_argument('--all', action='store_true',
-                        help='重新爬取資料庫中所有影片的資訊（需配合 --no-download）')
-    parser.add_argument('-q', '--queue', action='store_true',
-                        help='將 URL 加入佇列，不立即處理')
-    parser.add_argument('--install', action='store_true',
-                        help='處理並下載佇列中的所有影片')
-    parser.add_argument('--list', action='store_true',
-                        help='列出所有已入庫影片')
-    parser.add_argument('--search-actress', type=str, default='',
-                        help='依女優名稱搜尋')
-    parser.add_argument('--search-code', type=str, default='',
-                        help='依片號搜尋')
-
-    args = parser.parse_args()
-
-    if args.queue:
-        if not args.urls:
-            print('❌ 請提供至少一個影片 URL')
-            sys.exit(1)
-        queue_add(args.urls)
-        return
-
-    if args.install:
-        urls = queue_load()
-        if not urls:
-            print('（佇列為空）')
-            return
-        print(f'\n📦 開始處理佇列中的 {len(urls)} 部影片...')
-        results = []
-        for url in urls:
-            result = process_url(url, skip_download=False)
-            if result:
-                queue_remove(url)
-                results.append(result)
-        if results:
-            print(f'\n\n{"=" * 60}')
-            print(f'🎉 佇列處理完成！共 {len(results)} 部影片已入庫')
-            print(f'{"=" * 60}')
-            for r in results:
-                print(f'  • {r["code"]} - {r["actress"] or "?"} - {r["title"][:40]}')
-        return
-
-    if args.list:
-        print('\n📚 所有已入庫影片:')
-        rows = list_all_videos()
-        print_video_table(rows)
-        return
-
-    if args.search_actress:
-        print(f'\n🔍 搜尋女優: {args.search_actress}')
-        rows = search_by_actress(args.search_actress)
-        print_video_table(rows)
-        return
-
-    if args.search_code:
-        print(f'\n🔍 搜尋片號: {args.search_code}')
-        rows = search_by_code(args.search_code)
-        print_video_table(rows)
-        return
-
-    if args.all:
-        rows = list_all_videos()
-        if not rows:
-            print('（資料庫無影片）')
-            return
-        urls = [r['url'] for r in rows]
-        print(f'\n🔄 重新爬取 {len(urls)} 部影片資訊（不下載）...')
-    elif args.urls:
-        urls = args.urls
-    else:
-        parser.print_help()
-        print('\n❌ 請提供至少一個影片 URL，或使用 --all 重新爬取所有影片')
-        sys.exit(1)
-
-    results = []
-    for url in urls:
-        result = process_url(url, skip_download=True if args.all else args.no_download)
-        if result:
-            results.append(result)
-
-    # Summary
-    if results:
-        print(f'\n\n{"=" * 60}')
-        print(f'🎉 處理完成！共 {len(results)} 部影片已入庫')
-        print(f'{"=" * 60}')
-        for r in results:
-            print(f'  • {r["code"]} - {r["actress"] or "?"} - {r["title"][:40]}')
-
-
-if __name__ == '__main__':
-    main()
