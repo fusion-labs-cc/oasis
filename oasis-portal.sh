@@ -268,7 +268,13 @@ echo "  ✅ movies/ ready"
 step "Starting services"
 
 echo "  🟢 FastAPI backend  → http://localhost:8000"
-"$PYTHON" -m uvicorn api:app --app-dir backend --reload --port 8000 &
+# No --reload: this is the end-user launcher, and auto-reload restarts the
+# server (wiping the in-memory download queue) whenever a .py file changes,
+# which orphans the active download and drops queued ones. The Windows launcher
+# omits it too. (Interrupted downloads still resume from the DB on the next
+# start via the download_pending flag; for live code editing run uvicorn with
+# --reload manually — see README.)
+"$PYTHON" -m uvicorn api:app --app-dir backend --port 8000 &
 API_PID=$!
 
 if [ "$BACKEND_ONLY" = "1" ]; then

@@ -84,7 +84,28 @@ async def require_client_header(request: Request, call_next):
 def _init_db():
     """Ensure the SQLite database and tables exist (safe to call repeatedly)."""
     db_setup.create_tables()
+    _resume_pending_downloads()
     asyncio.create_task(_bg_check_analyses())
+
+
+def _resume_pending_downloads():
+    """Re-queue downloads that were requested but never finished before the last
+    shutdown/restart. In-memory queue state is volatile (a code edit under
+    uvicorn --reload, a crash, or a manual restart wipes it), so the DB's
+    download_pending flag is the durable source of truth. Interrupted downloads
+    resume from whatever segments already landed on disk."""
+    try:
+        pending = catalog.get_pending_downloads()
+    except Exception as e:
+        print(f"⚠️ Could not read pending downloads on startup: {e}")
+        return
+    if not pending:
+        return
+    print(f"🔄 Resuming {len(pending)} pending download(s) after restart")
+    for video_id, url in pending:
+        # Keep any persisted percent so the UI shows the resumed progress instead
+        # of resetting to 0/null; the worker seeds from it and only moves forward.
+        _start_download(video_id, url)
 
 
 class AnalyzeRequest(BaseModel):
@@ -143,12 +164,64 @@ async def _bg_check_analyses():
 
                     # Clean up process
                     proc.join()
+
+            # Advance the serial download pipeline: reap the finished download
+            # and start the next queued one.
+            _pump_downloads()
         except Exception as e:
             print(f"Error in background task check: {e}")
         await asyncio.sleep(1.0)
 
-# Track currently downloading video IDs → Process objects (process-safe check)
+# Track currently downloading video IDs → Process objects (process-safe check).
+# Downloads run one-at-a-time: at most one entry lives here; the rest wait in
+# `download_queue` until the active one finishes.
 active_downloads: dict[int, multiprocessing.Process] = {}
+
+# Pending downloads, processed in FIFO order (serialised, one at a time).
+download_queue: list[dict] = []
+
+# Per-video download progress files (whole percent, 0–100). The download runs
+# in a separate process, so it reports progress by writing a tiny file the API
+# process reads back in /api/download/{id}/status.
+import tempfile
+_PROGRESS_DIR = os.path.join(tempfile.gettempdir(), 'oasis_progress')
+
+
+def _progress_path(video_id: int) -> str:
+    return os.path.join(_PROGRESS_DIR, f'{video_id}.txt')
+
+
+def _cancel_marker_path(video_id: int) -> str:
+    """Marker file the API drops before terminating a download to signal a real
+    user cancel (vs. a plain server shutdown). The worker's shutdown handler
+    only wipes partial segments when this marker is present, so a Ctrl+C /
+    restart keeps them for resume."""
+    return os.path.join(_PROGRESS_DIR, f'{video_id}.cancel')
+
+
+def _mark_cancel(video_id: int) -> None:
+    try:
+        os.makedirs(_PROGRESS_DIR, exist_ok=True)
+        open(_cancel_marker_path(video_id), 'w').close()
+    except OSError:
+        pass
+
+
+def _read_progress(video_id: int) -> int | None:
+    """Current download percent for a video, or None if not yet reported."""
+    try:
+        with open(_progress_path(video_id)) as f:
+            return max(0, min(100, int(f.read().strip())))
+    except (OSError, ValueError):
+        return None
+
+
+def _clear_progress(video_id: int) -> None:
+    for path in (_progress_path(video_id), _cancel_marker_path(video_id)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _analyze_worker(url: str, result_queue: multiprocessing.Queue):
@@ -213,14 +286,23 @@ def _download_worker(video_id: int, url: str):
                 dr.quit()
             except:
                 pass
-        # Clean up temporary folder containing downloaded ts segments
+        # Only wipe partial segments when the user explicitly cancelled (marker
+        # present). On a plain server shutdown (Ctrl+C / restart) keep them so
+        # the download resumes from disk on the next start instead of restarting
+        # the file from scratch.
+        cancelled = os.path.exists(_cancel_marker_path(video_id))
         folder = getattr(dl, '_active_folder_path', None)
-        if folder and os.path.exists(folder):
+        if cancelled and folder and os.path.exists(folder):
             try:
                 shutil.rmtree(folder)
                 print(f"🧹 [PID {os.getpid()}] Cleaned up temp download folder {folder}")
             except Exception as e:
                 print(f"⚠️ Failed to remove temp folder {folder}: {e}")
+        if cancelled:
+            try:
+                os.remove(_cancel_marker_path(video_id))
+            except OSError:
+                pass
         # os._exit terminates immediately without waiting for the non-daemon
         # ThreadPoolExecutor worker threads to drain (which would otherwise
         # flood the log with "No such file" errors and delay shutdown).
@@ -238,8 +320,37 @@ def _download_worker(video_id: int, url: str):
 
         import catalog as _cat
         import download
+        import threading as _threading
         print(f"[PID {_os.getpid()}] Starting download for {url}")
-        download.download(url)
+
+        # Report progress by writing a tiny per-video file the API process polls.
+        # Seed from any existing file so a resumed download (segments already on
+        # disk from before a restart) picks up where it left off, and only ever
+        # move the percent *forward* — this keeps the setup phase (which reports
+        # a low 1–3%) from momentarily dipping the bar below the resumed value,
+        # so cards / detail / progress list all show one consistent number.
+        progress_path = _progress_path(video_id)
+        _os.makedirs(_os.path.dirname(progress_path), exist_ok=True)
+        _prog_lock = _threading.Lock()
+        try:
+            with open(progress_path) as _pf:
+                _seed = int(_pf.read().strip())
+        except (OSError, ValueError):
+            _seed = -1
+        _last_pct = {"v": _seed}
+
+        def _write_progress(pct: int):
+            with _prog_lock:
+                if pct <= _last_pct["v"]:
+                    return
+                _last_pct["v"] = pct
+            try:
+                with open(progress_path, "w") as pf:
+                    pf.write(str(pct))
+            except OSError:
+                pass
+
+        download.download(url, progress_cb=_write_progress)
 
         # Update the DB with the new local file path
         record = _cat.get_video_by_id(video_id)
@@ -247,7 +358,10 @@ def _download_worker(video_id: int, url: str):
             local_path = _cat.find_local_file(record['code'], record.get('title') or '')
             if local_path:
                 conn = _cat.get_connection()
-                conn.execute("UPDATE videos SET video_path = ? WHERE id = ?", (local_path, video_id))
+                conn.execute(
+                    "UPDATE videos SET video_path = ?, download_pending = 0 WHERE id = ?",
+                    (local_path, video_id),
+                )
                 conn.commit()
                 conn.close()
                 print(f"✅ [PID {_os.getpid()}] Download finished, DB updated for {record['code']} → {local_path}")
@@ -262,6 +376,7 @@ def _cleanup_finished():
     finished = [vid for vid, proc in active_downloads.items() if not proc.is_alive()]
     for vid in finished:
         active_downloads.pop(vid, None)
+        _clear_progress(vid)
 
 
 def _is_downloading(video_id: int) -> bool:
@@ -276,11 +391,13 @@ def _is_downloading(video_id: int) -> bool:
     return False
 
 
-def _start_download(video_id: int, url: str):
-    """Spawn a new download process (if not already running)."""
-    _cleanup_finished()
-    if _is_downloading(video_id):
-        return  # already in progress
+def _is_queued(video_id: int) -> bool:
+    """Check if a video is waiting in the download queue (not yet running)."""
+    return any(item["video_id"] == video_id for item in download_queue)
+
+
+def _spawn_download(video_id: int, url: str):
+    """Spawn the download process for a video and mark it active."""
     proc = multiprocessing.Process(
         target=_download_worker,
         args=(video_id, url),
@@ -289,6 +406,32 @@ def _start_download(video_id: int, url: str):
     )
     proc.start()
     active_downloads[video_id] = proc
+
+
+def _pump_downloads():
+    """Keep exactly one download running: reap finished ones, then start the
+    next queued download if nothing is currently in flight."""
+    _cleanup_finished()
+    if active_downloads:
+        return  # one already running — downloads are serialised
+    if download_queue:
+        item = download_queue.pop(0)
+        _spawn_download(item["video_id"], item["url"])
+
+
+def _start_download(video_id: int, url: str):
+    """Queue a download (deduped) and start it if the pipeline is idle. Downloads
+    run one at a time in FIFO order."""
+    _cleanup_finished()
+    if _is_downloading(video_id) or _is_queued(video_id):
+        return  # already running or waiting
+    # Persist the intent first so a server restart mid-queue can resume it.
+    try:
+        catalog.set_download_pending(video_id, True)
+    except Exception as e:
+        print(f"⚠️ Failed to mark download pending for {video_id}: {e}")
+    download_queue.append({"video_id": video_id, "url": url})
+    _pump_downloads()
 
 
 @app.post('/api/analyze')
@@ -373,8 +516,16 @@ def cancel_analyze(task_id: str):
 
 @app.post('/api/download/{video_id}/cancel')
 def cancel_download(video_id: int):
-    """Cancel an active background download."""
+    """Cancel an active background download, or drop it from the wait queue."""
     _cleanup_finished()
+
+    # Waiting in the queue but not started yet — just remove it.
+    if _is_queued(video_id):
+        download_queue[:] = [i for i in download_queue if i["video_id"] != video_id]
+        _clear_progress(video_id)
+        catalog.set_download_pending(video_id, False)
+        return {"status": "cancelled", "message": "下載已取消"}
+
     proc = active_downloads.pop(video_id, None)
     if not proc:
         record = catalog.get_video_by_id(video_id)
@@ -383,10 +534,18 @@ def cancel_download(video_id: int):
         raise HTTPException(status_code=404, detail="沒有正在下載的影片任務")
 
     if proc.is_alive():
+        # Drop the cancel marker first so the worker's shutdown handler knows to
+        # wipe the partial segments (a real cancel), not keep them for resume.
+        _mark_cancel(video_id)
         proc.terminate()
         proc.join()
         print(f"🛑 [PID {proc.pid}] Download task for video {video_id} terminated by client")
-        
+
+    _clear_progress(video_id)
+    # Clear the persisted intent so a restart doesn't resurrect a cancelled download.
+    catalog.set_download_pending(video_id, False)
+    # A slot just freed up — let the next queued download start.
+    _pump_downloads()
     return {"status": "cancelled", "message": "下載已取消"}
 
 
@@ -414,13 +573,16 @@ def trigger_download(video_id: int):
 def download_status(video_id: int):
     """Check the status of a download."""
     if _is_downloading(video_id):
-        return {"status": "downloading"}
+        return {"status": "downloading", "progress": _read_progress(video_id)}
+
+    if _is_queued(video_id):
+        return {"status": "queued", "progress": None}
 
     record = catalog.get_video_by_id(video_id)
     if record and record.get('video_path'):
-        return {"status": "completed"}
+        return {"status": "completed", "progress": 100}
 
-    return {"status": "idle"}
+    return {"status": "idle", "progress": None}
 
 def _resolve_local_file(video_path: str | None) -> str | None:
     """Resolve a DB video_path to an absolute path on disk, or None if the file
@@ -437,7 +599,18 @@ def _enrich_record(record: dict, with_size: bool = False) -> dict:
     if not record:
         return record
     video_id = record.get('id', -1)
-    record['is_downloading'] = _is_downloading(video_id)
+    # Internal persistence flag — not part of the public shape (the UI uses the
+    # computed download_queued / is_downloading below instead).
+    record.pop('download_pending', None)
+    downloading = _is_downloading(video_id)
+    queued = _is_queued(video_id)
+    # Treat a queued (waiting) download as "downloading" for the UI so cards keep
+    # showing the in-progress state until the serial pipeline reaches it.
+    record['is_downloading'] = downloading or queued
+    # Extra detail so cards / the detail page can distinguish "排隊中" from an
+    # active download and show a live percent.
+    record['download_queued'] = queued
+    record['download_progress'] = _read_progress(video_id) if downloading else None
 
     abs_path = _resolve_local_file(record.get('video_path'))
     record['local_file_exists'] = abs_path is not None

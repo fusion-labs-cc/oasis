@@ -20,8 +20,19 @@ from site_config import (
 _active_driver = None
 _active_folder_path = None
 
-def download(url):
+def download(url, progress_cb=None):
   global _active_driver, _active_folder_path
+
+  def _report(pct):
+    # Overall download progress in whole percent (0–100). Callback failures are
+    # non-fatal so a broken progress sink never aborts the download.
+    if progress_cb:
+      try:
+        progress_cb(int(pct))
+      except Exception:
+        pass
+
+  _report(1)
   encode = 1 #不轉檔
 #   action = input('要轉檔嗎?[y/n]')
 #   if action.lower() == 'y':
@@ -74,6 +85,7 @@ def download(url):
       dirPath = os.path.join(movies_folder, video_name)
       if os.path.exists(os.path.join(movies_folder, f'{video_name}.mp4')):
         print('影片已存在, 跳過...')
+        _report(100)
         return
       if not os.path.exists(dirPath):
           os.makedirs(dirPath)
@@ -134,16 +146,25 @@ def download(url):
   # 刪除m3u8 file
   deleteM3u8(folderPath)
 
+  # 準備完成，開始下載片段（片段下載佔整體進度的 3%–95%）
+  _report(3)
+
   # 開始爬蟲並下載mp4片段至資料夾（傳入下載用標頭）
-  prepareCrawl(contentKey, iv, folderPath, tsList, dl_headers)
+  # 片段進度 (done/total) 線性映射到整體的 3%–95%，保留尾段給合成/轉檔。
+  prepareCrawl(
+      contentKey, iv, folderPath, tsList, dl_headers,
+      progress_cb=lambda done, total: _report(3 + done / total * 92),
+  )
 
   # 合成mp4
+  _report(96)
   mergeMp4(folderPath, tsList)
 
   # 刪除子mp4
   deleteMp4(folderPath)
 
   # 轉檔
+  _report(98)
   ffmpegEncode(folderPath, video_name, encode)
 
   # 移出資料夾並刪除資料夾
@@ -151,4 +172,5 @@ def download(url):
   dst = os.path.join(movies_folder, f'{video_name}.mp4')
   os.rename(src, dst)
   os.rmdir(folderPath)
+  _report(100)
   print(f'✅ 影片已移至: {dst}')

@@ -70,7 +70,7 @@ function ManualField({
 }
 
 export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
-  const { syncVideo, upsertVideo } = useVideos();
+  const { syncVideo, upsertVideo, getVideo } = useVideos();
   const toast = useToast();
   // The progress list ("解析進度") is shared state so downloads started from
   // cards / the detail page also land here.
@@ -529,7 +529,16 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
             </button>
           </div>
           <div className="max-h-64 overflow-y-auto space-y-2.5 pr-1">
-            {tasks.map((task) => (
+            {tasks.map((task) => {
+              // Read the live download progress from the shared video record
+              // (the same source the video card / detail page use) so all three
+              // surfaces always show the identical number. Fall back to the
+              // task's own fields only before the record is available.
+              const video =
+                task.videoId != null ? getVideo(task.videoId) : undefined;
+              const dlProgress = video?.download_progress ?? task.progress;
+              const dlQueued = video?.download_queued ?? task.queued;
+              return (
               <div
                 key={task.id}
                 className="flex flex-col gap-1.5 rounded-xl border border-border-hairline bg-surface-base/50 p-3"
@@ -566,7 +575,11 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-accent animate-pulse">
                         <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-accent/20 border-t-accent" />
-                        下載中...
+                        {dlQueued
+                          ? "排隊中..."
+                          : typeof dlProgress === "number"
+                            ? `下載中 ${dlProgress}%`
+                            : "下載中..."}
                       </span>
                       {typeof task.videoId === "number" && (
                         <button
@@ -612,6 +625,22 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                   )}
                 </div>
 
+                {task.status === "downloading" && (
+                  <div className="mt-0.5">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-highest">
+                      {dlQueued ? (
+                        // No determinate progress yet — indeterminate shimmer.
+                        <div className="h-full w-1/3 animate-pulse rounded-full bg-accent/40" />
+                      ) : (
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+                          style={{ width: `${dlProgress ?? 0}%` }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {(task.status === "success" || task.status === "downloading") && (
                   <div className="mt-1 flex items-center justify-between gap-2 border-t border-border-hairline/50 pt-1.5">
                     <div className="flex items-center gap-2 min-w-0">
@@ -628,7 +657,15 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                       </span>
                     </div>
                     <span className="text-[9px] font-semibold text-text-tertiary shrink-0">
-                      {task.status === "downloading" ? "📥 下載中" : task.download ? "📥 下載完成" : "🔍 僅 analysis"}
+                      {task.status === "downloading"
+                        ? dlQueued
+                          ? "📥 排隊中"
+                          : typeof dlProgress === "number"
+                            ? `📥 下載中 ${dlProgress}%`
+                            : "📥 下載中"
+                        : task.download
+                          ? "📥 下載完成"
+                          : "🔍 僅分析"}
                     </span>
                   </div>
                 )}
@@ -639,7 +676,8 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                   </p>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

@@ -492,17 +492,32 @@ export default function VideoDetailPage() {
             
             <div className="flex flex-wrap items-center justify-center gap-3">
               {isDownloading ? (
-                <div className="flex items-center gap-3">
-                  <span className="inline-flex items-center gap-2 rounded-xl bg-accent/10 px-5 py-3 text-sm font-bold text-accent border border-accent/20 animate-pulse">
-                    <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
-                    正在背景下載中...
-                  </span>
-                  <button
-                    onClick={handleCancelDownload}
-                    className="rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-400 transition cursor-pointer"
-                  >
-                    取消下載
-                  </button>
+                <div className="flex flex-col items-center gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="inline-flex items-center gap-2 rounded-xl bg-accent/10 px-5 py-3 text-sm font-bold text-accent border border-accent/20 animate-pulse">
+                      <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+                      {video.download_queued
+                        ? "排隊中，等待前一支下載完成..."
+                        : typeof video.download_progress === "number"
+                          ? `正在背景下載中 ${video.download_progress}%`
+                          : "正在背景下載中..."}
+                    </span>
+                    <button
+                      onClick={handleCancelDownload}
+                      className="rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-400 transition cursor-pointer"
+                    >
+                      取消下載
+                    </button>
+                  </div>
+                  {!video.download_queued &&
+                    typeof video.download_progress === "number" && (
+                      <div className="h-1.5 w-64 max-w-full overflow-hidden rounded-full bg-surface-highest">
+                        <div
+                          className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+                          style={{ width: `${video.download_progress}%` }}
+                        />
+                      </div>
+                    )}
                 </div>
               ) : (
                 <button

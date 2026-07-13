@@ -24,6 +24,10 @@ export interface AnalysisTask {
   actress?: string;
   download: boolean;
   videoId?: number;
+  // Whole-percent download progress (0–100) while status === "downloading".
+  progress?: number;
+  // True while the download is waiting its turn in the backend's serial queue.
+  queued?: boolean;
 }
 
 interface TasksContextType {
@@ -87,7 +91,9 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
               if (res.status === "completed") {
                 setTasks((prev) =>
                   prev.map((t) =>
-                    t.id === task.id ? { ...t, status: "success" } : t
+                    t.id === task.id
+                      ? { ...t, status: "success", progress: 100, queued: false }
+                      : t
                   )
                 );
                 syncVideo(task.videoId);
@@ -96,6 +102,22 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
                   prev.map((t) =>
                     t.id === task.id
                       ? { ...t, status: "error", error: "下載已取消或失敗" }
+                      : t
+                  )
+                );
+              } else {
+                // "downloading" or "queued": surface progress / waiting state.
+                setTasks((prev) =>
+                  prev.map((t) =>
+                    t.id === task.id
+                      ? {
+                          ...t,
+                          queued: res.status === "queued",
+                          progress:
+                            typeof res.progress === "number"
+                              ? res.progress
+                              : t.progress,
+                        }
                       : t
                   )
                 );

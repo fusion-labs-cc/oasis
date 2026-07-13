@@ -18,6 +18,10 @@ export interface VideoRecord {
   play_count?: number;
   file_size?: number | null;
   local_file_exists?: boolean;
+  // True while the download is waiting its turn in the backend's serial queue.
+  download_queued?: boolean;
+  // Whole-percent download progress (0–100); null when queued or not downloading.
+  download_progress?: number | null;
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -176,7 +180,10 @@ export async function cancelDownload(id: number): Promise<{ status: string, mess
 }
 
 export interface DownloadStatusResponse {
-  status: "downloading" | "completed" | "idle";
+  status: "downloading" | "queued" | "completed" | "idle";
+  // Whole-percent download progress (0–100); null until the backend reports it
+  // or when the download is only queued.
+  progress?: number | null;
 }
 
 export async function checkDownloadStatus(id: number): Promise<DownloadStatusResponse> {

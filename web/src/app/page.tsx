@@ -644,7 +644,11 @@ function VideoCard({
             <div className="flex items-center gap-1.5">
               <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-accent animate-pulse">
                 <span className="h-1.5 w-1.5 rounded-full bg-accent animate-ping" />
-                正在下載中...
+                {video.download_queued
+                  ? "排隊中..."
+                  : typeof video.download_progress === "number"
+                    ? `下載中 ${video.download_progress}%`
+                    : "正在下載中..."}
               </span>
               <button
                 onClick={handleCancelDownload}
