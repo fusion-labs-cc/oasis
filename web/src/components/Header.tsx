@@ -4,13 +4,32 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import BackendStatus from "./BackendStatus";
 import AddVideoModal from "./AddVideoModal";
+import { useVideos } from "@/context/VideoContext";
+import { useToast } from "@/components/Toast";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [keyDisplay, setKeyDisplay] = useState("⌘ K");
   const [awakeKey, setAwakeKey] = useState("⌘ X");
+
+  const router = useRouter();
+  const { videos } = useVideos();
+  const toast = useToast();
+
+  // Pick a random already-downloaded video and jump to its detail page.
+  // "Downloaded" mirrors the VideoCard check: a local file that still exists.
+  function handleRandomPick() {
+    const downloaded = videos.filter((v) => v.video_path && v.local_file_exists);
+    if (downloaded.length === 0) {
+      toast("目前沒有已下載的影片可供隨機播放", { type: "info" });
+      return;
+    }
+    const pick = downloaded[Math.floor(Math.random() * downloaded.length)];
+    router.push(`/video/${pick.id}`);
+  }
 
   // OS detection for keyboard shortcut display
   useEffect(() => {
@@ -70,6 +89,31 @@ export default function Header() {
 
           <div className="flex items-center gap-4">
             <BackendStatus />
+
+            {/* Random Pick Action Button — jumps to a random downloaded video */}
+            <button
+              type="button"
+              onClick={handleRandomPick}
+              title="隨機播放：從已下載的影片中隨機挑一部"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-hairline bg-surface-elevated text-text-secondary transition duration-200 hover:scale-[1.02] hover:bg-surface-highest hover:text-text-primary active:scale-98 cursor-pointer"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M16 3h5v5" />
+                <path d="M4 20 21 3" />
+                <path d="M21 16v5h-5" />
+                <path d="m15 15 6 6" />
+                <path d="M4 4l5 5" />
+              </svg>
+              <span className="text-xs font-semibold">隨機播放</span>
+            </button>
 
             {/* Awake Mode (boss key) Action Button */}
             <button
