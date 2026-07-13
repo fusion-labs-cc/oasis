@@ -163,6 +163,20 @@ def update_check():
     return version.check_for_update()
 
 
+@app.post('/api/update/apply')
+def update_apply():
+    """Download the latest release and swap it in, then relaunch the backend.
+
+    Sync `def` so FastAPI runs the (blocking) download in a threadpool. On
+    success the backend exits ~1.5s after responding while a detached helper
+    performs the file swap and relaunch, so the frontend should poll
+    /api/health and reconnect. Only meaningful for the frozen build; a source
+    checkout gets an error telling it to use git.
+    """
+    import updater
+    return updater.apply_update()
+
+
 @app.get('/api/supported-sites')
 def supported_sites():
     """List the sites the URL analyser currently supports (for the UI).

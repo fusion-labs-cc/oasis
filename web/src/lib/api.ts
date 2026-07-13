@@ -112,6 +112,23 @@ export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> 
   return res.json();
 }
 
+export interface ApplyUpdateResult {
+  // "updating" → the backend downloaded the new build and will exit + relaunch
+  // itself; poll checkHealth until it's back. "error" → nothing changed.
+  status: "updating" | "error";
+  latest?: string | null;
+  error?: string;
+}
+
+// Tell the local backend to download the latest release and swap itself in.
+// Only the frozen build can do this; a source checkout returns an error. On
+// "updating" the backend restarts, so the caller should wait for checkHealth.
+export async function applyUpdate(): Promise<ApplyUpdateResult> {
+  const res = await backendFetch("/api/update/apply", { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface SupportedSite {
   id: string;
   name: string;

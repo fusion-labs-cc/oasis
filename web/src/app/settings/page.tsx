@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
-import { checkForUpdate, UpdateInfo } from "@/lib/api";
+import { applyUpdate, checkForUpdate, checkHealth, UpdateInfo } from "@/lib/api";
 import {
   defaultSettings,
   formatHotkey,
@@ -117,6 +117,10 @@ function UpdateSection() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // null → idle; otherwise the current phase of an in-progress auto-update.
+  const [updating, setUpdating] = useState<
+    "downloading" | "restarting" | null
+  >(null);
 
   async function runCheck(signal?: AbortSignal) {
     setChecking(true);
@@ -128,6 +132,48 @@ function UpdateSection() {
       setError("無法連線到後端，請確認 OASIS 後端正在執行後再試。");
     } finally {
       if (!signal?.aborted) setChecking(false);
+    }
+  }
+
+  // Wait for the backend to go down and come back up after it relaunches
+  // itself, then re-check so the UI reflects the freshly installed version.
+  async function waitForRestart() {
+    const deadline = Date.now() + 180_000; // 3 min — the swap + relaunch is quick
+    // Give the old process time to actually exit before we start expecting a
+    // *new* healthy answer (otherwise we'd immediately see the old one as "up").
+    await new Promise((r) => setTimeout(r, 4000));
+    while (Date.now() < deadline) {
+      if (await checkHealth()) return true;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    return false;
+  }
+
+  async function runUpdate() {
+    setError(null);
+    setUpdating("downloading");
+    try {
+      const res = await applyUpdate();
+      if (res.status !== "updating") {
+        setError(res.error ?? "更新失敗。");
+        setUpdating(null);
+        return;
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新失敗。");
+      setUpdating(null);
+      return;
+    }
+
+    setUpdating("restarting");
+    const back = await waitForRestart();
+    setUpdating(null);
+    if (back) {
+      await runCheck();
+    } else {
+      setError(
+        "後端重新啟動逾時。更新可能仍在進行，請稍候重新整理頁面；若持續無法連線，請手動重新啟動 OASIS。",
+      );
     }
   }
 
@@ -158,7 +204,7 @@ function UpdateSection() {
         title="軟體更新"
         description={
           info?.update_available
-            ? "有新版本可用。下載後解壓縮覆蓋原資料夾即可，你的資料庫與影片會保留。"
+            ? "有新版本可用。點「立即更新」會自動下載並安裝，完成後後端會自行重新啟動，你的資料庫與影片會保留。"
             : "檢查是否有新的發行版本。"
         }
       >
@@ -173,41 +219,63 @@ function UpdateSection() {
               {info.error}
             </p>
           )}
-          {info && !info.error && (
+          {updating ? (
             <p className="text-xs text-text-tertiary">
-              {info.update_available ? (
-                <>
-                  最新版本{" "}
-                  <span className="font-mono font-bold text-accent">
-                    {info.latest}
-                  </span>
-                </>
-              ) : (
-                "已是最新版本"
-              )}
+              {updating === "downloading"
+                ? "下載更新中…"
+                : "安裝完成，正在重新啟動後端…"}
             </p>
+          ) : (
+            info &&
+            !info.error && (
+              <p className="text-xs text-text-tertiary">
+                {info.update_available ? (
+                  <>
+                    最新版本{" "}
+                    <span className="font-mono font-bold text-accent">
+                      {info.latest}
+                    </span>
+                  </>
+                ) : (
+                  "已是最新版本"
+                )}
+              </p>
+            )
           )}
 
           <div className="flex items-center gap-2">
             {info?.update_available && (
-              <a
-                href={info.download_url ?? info.release_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-neutral-950 transition hover:bg-accent-hover shadow-[0_2px_10px_rgba(16,185,129,0.2)]"
+              <button
+                type="button"
+                onClick={() => runUpdate()}
+                disabled={updating !== null || checking}
+                className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-neutral-950 transition hover:bg-accent-hover shadow-[0_2px_10px_rgba(16,185,129,0.2)] disabled:opacity-50 cursor-pointer"
               >
-                下載更新
-              </a>
+                {updating ? "更新中…" : "立即更新"}
+              </button>
             )}
             <button
               type="button"
               onClick={() => runCheck()}
-              disabled={checking}
+              disabled={checking || updating !== null}
               className="rounded-lg border border-border-hairline bg-surface-highest px-4 py-2 text-xs font-bold text-text-secondary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
             >
               {checking ? "檢查中…" : "檢查更新"}
             </button>
           </div>
+
+          {/* Fallback for source checkouts (auto-update is frozen-build only) or
+              if the in-app update fails — the manual download still works. */}
+          {info?.update_available && (
+            <a
+              href={info.download_url ?? info.release_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-text-tertiary underline decoration-dotted underline-offset-2 transition hover:text-text-secondary"
+            >
+              或手動下載
+            </a>
+          )}
         </div>
       </Field>
     </section>
