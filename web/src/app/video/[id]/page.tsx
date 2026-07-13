@@ -148,6 +148,13 @@ export default function VideoDetailPage() {
         setConfirmingDelete(false);
       } else {
         leaving.current = true;
+        // Tear down Plyr *before* the state change unmounts this page. Plyr
+        // re-parents the <video> into its own wrapper; if React removes the DOM
+        // first it throws "removeChild: node is not a child" because the passive
+        // effect cleanup that would restore the element runs after commit, too
+        // late. Destroying here puts the original <video> back in place first.
+        plyrRef.current?.destroy();
+        plyrRef.current = null;
         removeVideo(video.id);
         router.push("/");
       }
@@ -405,8 +412,12 @@ export default function VideoDetailPage() {
       el.removeEventListener("ended", onEnded);
       window.removeEventListener("beforeunload", save);
       cancelled = true;
-      player?.destroy();
-      plyrRef.current = null;
+      // Guard against double-destroy: handleDelete may have torn Plyr down
+      // already (and nulled the ref) to avoid a React removeChild race.
+      if (plyrRef.current) {
+        plyrRef.current.destroy();
+        plyrRef.current = null;
+      }
       theaterBtnRef.current = null;
     };
   }, [video?.video_path, video?.local_file_exists, video?.id]);
