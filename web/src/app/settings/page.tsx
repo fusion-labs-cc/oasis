@@ -103,11 +103,6 @@ function Field({
   );
 }
 
-type UpdateState =
-  | { phase: "loading" }
-  | { phase: "error"; message: string }
-  | { phase: "ready"; info: UpdateInfo };
-
 /**
  * Shows the running build's version and, when the backend can reach GitHub,
  * whether a newer release exists — with a direct download for this OS. The
@@ -116,19 +111,23 @@ type UpdateState =
  * note with a manual retry rather than breaking the settings page.
  */
 function UpdateSection() {
-  const [state, setState] = useState<UpdateState>({ phase: "loading" });
+  // Keep the last result across re-checks: the current version is the build's
+  // own and never changes, so it stays on screen while re-checking instead of
+  // flickering to a placeholder — the button already signals the busy state.
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   async function runCheck(signal?: AbortSignal) {
-    setState({ phase: "loading" });
+    setChecking(true);
+    setError(null);
     try {
-      const info = await checkForUpdate(signal);
-      setState({ phase: "ready", info });
+      setInfo(await checkForUpdate(signal));
     } catch {
       if (signal?.aborted) return;
-      setState({
-        phase: "error",
-        message: "無法連線到後端，請確認 OASIS 後端正在執行後再試。",
-      });
+      setError("無法連線到後端，請確認 OASIS 後端正在執行後再試。");
+    } finally {
+      if (!signal?.aborted) setChecking(false);
     }
   }
 
@@ -137,9 +136,6 @@ function UpdateSection() {
     runCheck(controller.signal);
     return () => controller.abort();
   }, []);
-
-  const info = state.phase === "ready" ? state.info : null;
-  const checking = state.phase === "loading";
 
   return (
     <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">
@@ -154,7 +150,7 @@ function UpdateSection() {
         description="此後端執行檔的版本。原始碼直接執行時會顯示為 dev。"
       >
         <span className="font-mono text-sm font-bold text-text-primary">
-          {checking ? "檢查中…" : info?.current ?? "—"}
+          {info?.current ?? (checking ? "檢查中…" : "—")}
         </span>
       </Field>
 
@@ -167,9 +163,9 @@ function UpdateSection() {
         }
       >
         <div className="flex flex-col items-end gap-2">
-          {state.phase === "error" && (
+          {error && (
             <p className="max-w-[16rem] text-right text-xs text-amber-500">
-              {state.message}
+              {error}
             </p>
           )}
           {info?.error && (
