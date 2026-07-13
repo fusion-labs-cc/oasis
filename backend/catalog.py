@@ -14,7 +14,10 @@ import sys
 # Backend root (this folder) holds the code + DB; movies/ lives one level up
 # at the repo root (MEDIA_ROOT).
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-MEDIA_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
+# In a source checkout movies/ sits one level up; a frozen build overrides this
+# via OASIS_MEDIA_ROOT so media resolves next to the .exe rather than inside the
+# read-only extraction dir.
+MEDIA_ROOT = os.environ.get('OASIS_MEDIA_ROOT') or os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
 import json

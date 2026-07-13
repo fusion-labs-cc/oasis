@@ -23,8 +23,9 @@ from pydantic import BaseModel
 
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 # movies/ lives at the repo root (one level above backend/); video_path values
-# in the DB are relative to this MEDIA_ROOT.
-MEDIA_ROOT = os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
+# in the DB are relative to this MEDIA_ROOT. A frozen build overrides it via
+# OASIS_MEDIA_ROOT so media resolves next to the .exe, not the extraction dir.
+MEDIA_ROOT = os.environ.get('OASIS_MEDIA_ROOT') or os.path.abspath(os.path.join(PROJECT_ROOT, '..'))
 
 # All backend modules are co-located in this folder; make sure it is importable
 # even when uvicorn is launched from a different working directory.

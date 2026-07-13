@@ -1,0 +1,124 @@
+name: Release
+
+# Push a version tag to build the backend for each OS and publish a GitHub
+# Release with every artifact attached:
+#     git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:      # manual run from the Actions tab (builds only, no release)
+    inputs:
+      platform:
+        description: "Platform(s) to build on a manual run"
+        type: choice
+        default: both
+        options: [both, windows, macos]
+
+permissions:
+  contents: write         # required to create the Release
+
+jobs:
+  build-windows:
+    # On a tag push always build; on a manual run only if windows was selected.
+    if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["both","windows"]'), github.event.inputs.platform) }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Build backend (onedir)
+        run: pyinstaller --noconfirm oasis-backend.spec
+
+      - name: Bundle FFmpeg
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_extracted
+          $bin = "dist/oasis-backend/bin"
+          New-Item -ItemType Directory -Force -Path $bin | Out-Null
+          $exe = Get-ChildItem ffmpeg_extracted -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $exe.FullName "$bin/ffmpeg.exe"
+          # GPL-3.0 requires the license to accompany the redistributed binary.
+          $lic = Get-ChildItem ffmpeg_extracted -Recurse -Filter LICENSE* | Select-Object -First 1
+          if ($lic) { Copy-Item $lic.FullName "$bin/ffmpeg-LICENSE.txt" }
+
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/oasis-backend/* -DestinationPath oasis-backend-win64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oasis-backend-win64
+          path: oasis-backend-win64.zip
+
+  build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["both","macos"]'), github.event.inputs.platform) }}
+    runs-on: macos-latest     # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Build backend (onedir)
+        run: pyinstaller --noconfirm oasis-backend.spec
+
+      - name: Bundle FFmpeg
+        run: |
+          url="https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/ffmpeg.zip"
+          curl -fsSL "$url" -o ffmpeg.zip
+          unzip -q ffmpeg.zip -d ffmpeg_extracted
+          bin="dist/oasis-backend/bin"
+          mkdir -p "$bin"
+          ff="$(find ffmpeg_extracted -type f -name ffmpeg | head -1)"
+          cp "$ff" "$bin/ffmpeg"
+          chmod +x "$bin/ffmpeg"
+          # GPL builds ship their license text; carry it alongside the binary.
+          lic="$(find ffmpeg_extracted -iname 'LICENSE*' -o -iname 'GPL*' | head -1)"
+          if [ -n "$lic" ]; then cp "$lic" "$bin/ffmpeg-LICENSE.txt"; fi
+
+      - name: Package zip
+        # `ditto` preserves the executable bit and PyInstaller's symlinks inside
+        # the app folder, which a plain Compress step would flatten. No parent
+        # folder, so the layout matches the Windows zip (contents at the root).
+        run: ditto -c -k --sequesterRsrc dist/oasis-backend oasis-backend-macos-arm64.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oasis-backend-macos-arm64
+          path: oasis-backend-macos-arm64.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true

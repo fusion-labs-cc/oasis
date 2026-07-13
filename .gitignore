@@ -21,6 +21,11 @@ chromedriver*
 # Aider
 .aider*
 
+# PyInstaller (local builds; CI produces the shipped zips)
+/build/
+/dist/
+/oasis-backend-*.zip
+
 # Node
 node_modules/
 .next/
