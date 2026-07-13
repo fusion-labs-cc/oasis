@@ -173,6 +173,21 @@ export interface ExportedVideo {
   cover?: string | null;
 }
 
+// Reduce a full catalog record to the portable export shape (drops the local
+// path, play count, download state, etc.). Used to export a client-side
+// selection without a round-trip to the backend.
+export function toExportedVideo(v: VideoRecord): ExportedVideo {
+  return {
+    code: v.code,
+    url: v.url,
+    title: v.title,
+    title_zh_tw: v.title_zh_tw ?? null,
+    actress: v.actress ?? null,
+    tags: v.tags ?? [],
+    cover: v.cover ?? null,
+  };
+}
+
 // Fetch the whole catalog as portable JSON (metadata only), e.g. to save a backup.
 export async function exportVideos(): Promise<ExportedVideo[]> {
   const res = await backendFetch("/api/export", { cache: "no-store" });

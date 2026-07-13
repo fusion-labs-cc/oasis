@@ -13,12 +13,26 @@ interface ImportExportModalProps {
   isOpen: boolean;
   tab: Tab;
   onClose: () => void;
+  // When provided, the export tab serialises this fixed list (e.g. a selection)
+  // instead of fetching the whole catalog from the backend.
+  exportData?: ExportedVideo[] | null;
+  // Hide the import tab and lock to export (used by the "export selection" flow).
+  exportOnly?: boolean;
+  // Extra line under the title, e.g. "匯出所選 3 部影片".
+  subtitle?: string;
 }
 
 const textareaClass =
   "w-full h-64 resize-none bg-surface-highest border border-border-hairline rounded-xl px-3.5 py-2.5 text-xs font-mono text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-accent/40 focus:ring-1 focus:ring-accent/40 transition";
 
-export default function ImportExportModal({ isOpen, tab, onClose }: ImportExportModalProps) {
+export default function ImportExportModal({
+  isOpen,
+  tab,
+  onClose,
+  exportData = null,
+  exportOnly = false,
+  subtitle,
+}: ImportExportModalProps) {
   const { refresh } = useVideos();
   const toast = useToast();
 
@@ -55,9 +69,17 @@ export default function ImportExportModal({ isOpen, tab, onClose }: ImportExport
     }
   }, [isOpen, tab]);
 
-  // Load the export JSON whenever the export tab becomes visible.
+  // Load the export JSON whenever the export tab becomes visible. With a fixed
+  // list (a selection) serialise it directly; otherwise fetch the whole catalog.
   useEffect(() => {
     if (!isOpen || mode !== "export") return;
+    if (exportData) {
+      setExportJson(JSON.stringify(exportData, null, 2));
+      setExportCount(exportData.length);
+      setExportLoading(false);
+      setExportError(null);
+      return;
+    }
     let active = true;
     setExportLoading(true);
     setExportError(null);
@@ -77,7 +99,7 @@ export default function ImportExportModal({ isOpen, tab, onClose }: ImportExport
     return () => {
       active = false;
     };
-  }, [isOpen, mode]);
+  }, [isOpen, mode, exportData]);
 
   const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDialogElement>) => {
     backdropMouseDownRef.current = e.target === dialogRef.current;
@@ -175,11 +197,15 @@ export default function ImportExportModal({ isOpen, tab, onClose }: ImportExport
     >
       <div className="flex items-center justify-between border-b border-border-hairline pb-4 mb-4">
         <div>
-          <h2 className="text-base font-bold text-text-primary">匯入 / 匯出</h2>
+          <h2 className="text-base font-bold text-text-primary">
+            {exportOnly ? "匯出所選影片" : "匯入 / 匯出"}
+          </h2>
           <p className="text-xs text-text-tertiary mt-0.5 font-sans">
-            {mode === "export"
-              ? "複製或下載整個影片目錄（僅中繼資料，不含影片檔）"
-              : "貼上或上傳先前匯出的 JSON 以還原影片目錄"}
+            {subtitle
+              ? subtitle
+              : mode === "export"
+                ? "複製或下載整個影片目錄（僅中繼資料，不含影片檔）"
+                : "貼上或上傳先前匯出的 JSON 以還原影片目錄"}
           </p>
         </div>
         <button
@@ -191,7 +217,8 @@ export default function ImportExportModal({ isOpen, tab, onClose }: ImportExport
         </button>
       </div>
 
-      {/* Mode tabs */}
+      {/* Mode tabs — hidden when locked to export-only (e.g. export a selection) */}
+      {!exportOnly && (
       <div className="mb-4 flex gap-1 rounded-xl border border-border-hairline bg-surface-highest/40 p-1">
         {([
           ["export", "匯出"],
@@ -211,6 +238,7 @@ export default function ImportExportModal({ isOpen, tab, onClose }: ImportExport
           </button>
         ))}
       </div>
+      )}
 
       {mode === "export" && (
         <div className="space-y-3.5">

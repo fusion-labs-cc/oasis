@@ -4,21 +4,31 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { computeFacets, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, VideoRecord } from "@/lib/api";
+import { computeFacets, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, VideoRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
 import SupportedSites from "@/components/SupportedSites";
+import ImportExportModal from "@/components/ImportExportModal";
 
 export default function Home() {
   // Full catalog lives in the shared VideoContext so it survives navigation.
   // Filtering below is all client-side.
-  const { videos: allVideos, loading: loadingList, error, updateVideo } = useVideos();
+  const { videos: allVideos, loading: loadingList, error, updateVideo, removeVideo } = useVideos();
 
   // Filters
   const [selectedActress, setSelectedActress] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [match, setMatch] = useState<"all" | "any">("all");
+
+  // Multi-select. Selection is keyed by video id and lives *above* the filter,
+  // so a video stays selected even after the filter hides it from the grid —
+  // switching filters lets the user gather a selection across many views.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [exportSelectionOpen, setExportSelectionOpen] = useState(false);
 
   const toast = useToast();
   const [lastWatched, setLastWatched] = useState<{
@@ -141,6 +151,95 @@ export default function Home() {
   }
 
   const hasFilters = selectedActress !== null || selectedTags.length > 0;
+
+  const toggleSelect = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Add every currently *visible* (filtered-in) video to the selection, leaving
+  // any already-selected-but-hidden ones untouched.
+  const selectAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const v of videos) if (v.id != null) next.add(v.id);
+      return next;
+    });
+  }, [videos]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setConfirmingDelete(false);
+  }, []);
+
+  const exitSelectMode = useCallback(() => {
+    setSelectMode(false);
+    clearSelection();
+  }, [clearSelection]);
+
+  // Drop ids that no longer exist (e.g. after a delete or catalog refresh) so
+  // the selection count never counts phantom videos.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(allVideos.map((v) => v.id));
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [allVideos]);
+
+  // The actual selected records, in catalog order. Used for both export and
+  // delete. Pulled from the *unfiltered* list so hidden selections are included.
+  const selectedVideos = useMemo(
+    () => allVideos.filter((v) => v.id != null && selectedIds.has(v.id)),
+    [allVideos, selectedIds],
+  );
+  const selectedExportData = useMemo<ExportedVideo[]>(
+    () => selectedVideos.map(toExportedVideo),
+    [selectedVideos],
+  );
+  // How many selected videos are currently hidden by the filter — surfaced in
+  // the toolbar so it's clear the selection spans more than what's on screen.
+  const hiddenSelectedCount = useMemo(() => {
+    const visible = new Set(videos.map((v) => v.id));
+    let n = 0;
+    for (const id of selectedIds) if (!visible.has(id)) n++;
+    return n;
+  }, [videos, selectedIds]);
+
+  async function handleBulkDelete() {
+    if (bulkBusy || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    const ids = [...selectedIds];
+    let ok = 0;
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await deleteVideo(id);
+        removeVideo(id);
+        ok++;
+      } catch {
+        failed++;
+      }
+    }
+    setBulkBusy(false);
+    setConfirmingDelete(false);
+    setSelectedIds(new Set());
+    if (failed === 0) {
+      toast(`已刪除 ${ok} 部影片`, { type: "success" });
+    } else {
+      toast(`已刪除 ${ok} 部，${failed} 部刪除失敗`, { type: failed === ids.length ? "error" : "info" });
+    }
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-[1680px] justify-between gap-8 px-8 py-10">
@@ -297,23 +396,112 @@ export default function Home() {
         )}
 
         <section>
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold text-text-secondary">
               資料庫{" "}
               <span className="text-text-tertiary text-xs font-mono ml-1">
                 ({hasFilters ? `${videos.length} / ${allVideos.length}` : allVideos.length})
               </span>
             </h2>
-            {hasFilters && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="text-xs text-accent hover:text-accent-hover font-semibold transition cursor-pointer"
-              >
-                清除篩選
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {hasFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="text-xs text-accent hover:text-accent-hover font-semibold transition cursor-pointer"
+                >
+                  清除篩選
+                </button>
+              )}
+              {allVideos.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                  className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    selectMode
+                      ? "border-accent/40 bg-accent/10 text-accent"
+                      : "border-border-hairline bg-surface-elevated text-text-secondary hover:bg-surface-highest hover:text-text-primary"
+                  }`}
+                >
+                  {selectMode ? "完成選取" : "選取"}
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* Selection toolbar — appears in select mode. Selection is kept by id
+              above the filter, so counts include videos hidden by the filter. */}
+          {selectMode && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-accent/20 bg-accent/5 px-4 py-3">
+              <div className="text-xs font-semibold text-text-secondary">
+                已選取{" "}
+                <span className="font-mono font-bold text-accent">{selectedIds.size}</span> 部
+                {hiddenSelectedCount > 0 && (
+                  <span className="ml-1 text-text-tertiary font-sans">
+                    （其中 {hiddenSelectedCount} 部因篩選未顯示）
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllVisible}
+                  disabled={videos.length === 0}
+                  className="rounded-lg border border-border-hairline bg-surface-elevated px-3 py-1.5 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  全選（目前顯示 {videos.length}）
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  disabled={selectedIds.size === 0}
+                  className="rounded-lg border border-border-hairline bg-surface-elevated px-3 py-1.5 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  清除選取
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportSelectionOpen(true)}
+                  disabled={selectedIds.size === 0}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-bold text-neutral-950 transition hover:bg-accent-hover shadow-[0_2px_10px_rgba(16,185,129,0.2)] disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  匯出所選
+                </button>
+                {confirmingDelete ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/5 px-2 py-1">
+                    <span className="text-xs font-semibold text-red-400">
+                      刪除 {selectedIds.size} 部？
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleBulkDelete}
+                      disabled={bulkBusy}
+                      className="rounded-md bg-red-500 px-2.5 py-1 text-xs font-bold text-white transition hover:bg-red-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {bulkBusy ? "刪除中…" : "確定"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(false)}
+                      disabled={bulkBusy}
+                      className="rounded-md px-2 py-1 text-xs font-semibold text-text-tertiary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingDelete(true)}
+                    disabled={selectedIds.size === 0}
+                    className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-bold text-red-400 transition hover:bg-red-500/20 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    刪除所選
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {loadingList ? (
             /* Animated Skeletons matching the 3/4-column structure */
@@ -374,6 +562,9 @@ export default function Home() {
                   video={v}
                   selectedTags={selectedTags}
                   onTagClick={toggleTag}
+                  selectMode={selectMode}
+                  selected={v.id != null && selectedIds.has(v.id)}
+                  onToggleSelect={toggleSelect}
                 />
               ))}
             </ul>
@@ -479,6 +670,17 @@ export default function Home() {
           )}
         </div>
       </aside>
+
+      {/* Export the current selection (copy or download) — reuses the shared
+          dialog locked to export with the selection as its fixed data. */}
+      <ImportExportModal
+        isOpen={exportSelectionOpen}
+        tab="export"
+        exportOnly
+        exportData={selectedExportData}
+        subtitle={`匯出所選 ${selectedExportData.length} 部影片（僅中繼資料，不含影片檔）`}
+        onClose={() => setExportSelectionOpen(false)}
+      />
     </div>
   );
 }
@@ -503,10 +705,16 @@ function VideoCard({
   video,
   selectedTags,
   onTagClick,
+  selectMode,
+  selected,
+  onToggleSelect,
 }: {
   video: VideoRecord;
   selectedTags: string[];
   onTagClick: (tag: string) => void;
+  selectMode: boolean;
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
 }) {
   const toast = useToast();
   const { updateVideo } = useVideos();
@@ -580,7 +788,35 @@ function VideoCard({
   };
 
   return (
-    <li className="group flex flex-col overflow-hidden rounded-xl border border-border-hairline bg-surface-elevated tactile-card h-full">
+    <li
+      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-surface-elevated tactile-card h-full transition ${
+        selected
+          ? "border-accent ring-2 ring-accent/60"
+          : "border-border-hairline"
+      }`}
+    >
+      {/* Selection overlay: in select mode the whole card toggles selection and
+          the underlying links/buttons are covered so they don't fire. */}
+      {selectMode && (
+        <>
+          <button
+            type="button"
+            onClick={() => video.id != null && onToggleSelect(video.id)}
+            aria-pressed={selected}
+            aria-label={selected ? "取消選取此影片" : "選取此影片"}
+            className="absolute inset-0 z-20 cursor-pointer bg-accent/0 hover:bg-accent/5 transition"
+          />
+          <div
+            className={`pointer-events-none absolute left-3 top-3 z-30 flex h-6 w-6 items-center justify-center rounded-md border text-[13px] font-bold shadow-sm ${
+              selected
+                ? "border-accent bg-accent text-neutral-950"
+                : "border-white/70 bg-neutral-900/60 text-transparent"
+            }`}
+          >
+            ✓
+          </div>
+        </>
+      )}
       <Link href={`/video/${video.id}`} className="block relative aspect-video w-full overflow-hidden bg-surface-highest">
         {video.cover ? (
           // eslint-disable-next-line @next/next/no-img-element
