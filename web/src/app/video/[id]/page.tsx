@@ -173,22 +173,29 @@ export default function VideoDetailPage() {
   // stop propagation so a focused control can't swallow Space to re-fire
   // itself, and so Plyr's own global handler doesn't act twice.
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const player = plyrRef.current;
-      if (!player) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const managed = new Set([" ", "k", "K", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
 
-      // Don't hijack typing in the page's own inputs (tags, details…). Plyr's
-      // range inputs live inside `.plyr`, so those are still handled here.
+    // True when we should own this key: a player exists, no modifier is held,
+    // and focus isn't in one of the page's own text inputs. Plyr's range
+    // inputs live inside `.plyr`, so those stay under our control.
+    const owns = (e: KeyboardEvent) => {
+      if (!plyrRef.current) return false;
+      if (e.metaKey || e.ctrlKey || e.altKey) return false;
+      if (!managed.has(e.key)) return false;
       const el = document.activeElement as HTMLElement | null;
       if (
         el &&
         (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) &&
         !el.closest(".plyr")
       ) {
-        return;
+        return false;
       }
+      return true;
+    };
 
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!owns(e)) return;
+      const player = plyrRef.current!;
       switch (e.key) {
         case " ":
         case "k":
@@ -207,14 +214,26 @@ export default function VideoDetailPage() {
         case "ArrowDown":
           player.decreaseVolume(0.1);
           break;
-        default:
-          return;
       }
       e.preventDefault();
       e.stopPropagation();
     };
+
+    // A focused control button (e.g. the settings gear, which toggles a popup)
+    // synthesizes its activation click on Space *keyup*, not keydown — so also
+    // swallow keyup for the keys we manage to stop it re-firing that control.
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (!owns(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
   }, []);
 
   // "t" toggles theater mode, YouTube-style (ignored while typing).
