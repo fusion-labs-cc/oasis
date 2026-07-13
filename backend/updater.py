@@ -197,15 +197,33 @@ Log '=== done ==='
 
 
 def _spawn_detached(script: str) -> None:
-    """Launch the helper so it outlives this process."""
+    """Launch the helper so it outlives this process.
+
+    On Windows the backend may be running inside a Job object (some launchers and
+    terminals create one with KILL_ON_JOB_CLOSE). DETACHED_PROCESS only gives the
+    child its own console -- it does NOT remove it from that job, so the instant
+    this backend exits, the job closes and the "detached" helper is killed before
+    it runs a single line: no update.log, no swap, no relaunch. CREATE_BREAKAWAY_FROM_JOB
+    pulls the helper out of the job so it survives. If the job forbids breakaway
+    (no JOB_OBJECT_LIMIT_BREAKAWAY_OK), CreateProcess fails with that flag, so we
+    retry without it.
+    """
     if sys.platform == "win32":
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+        base_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        kwargs = dict(
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             close_fds=True,
         )
+        try:
+            subprocess.Popen(cmd, creationflags=base_flags | CREATE_BREAKAWAY_FROM_JOB, **kwargs)
+        except OSError:
+            subprocess.Popen(cmd, creationflags=base_flags, **kwargs)
     else:
         subprocess.Popen(
             ["/bin/sh", script],
