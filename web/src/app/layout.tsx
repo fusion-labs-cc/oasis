@@ -7,6 +7,7 @@ import { TasksProvider } from "@/context/TasksContext";
 import Header from "@/components/Header";
 import AwakeMode from "@/components/AwakeMode";
 import OasisGate from "@/components/OasisGate";
+import ScrollToTop from "@/components/ScrollToTop";
 import "./globals.css";
 
 // This UI is predominantly Chinese (CJK), which the Latin-subset Geist webfonts
@@ -64,6 +65,7 @@ export default function RootLayout({
               <ToastProvider>
                 <Header />
                 {children}
+                <ScrollToTop />
                 <OasisGate />
                 <AwakeMode />
               </ToastProvider>

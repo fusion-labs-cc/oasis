@@ -158,6 +158,19 @@ export default function VideoDetailPage() {
     }
   }
 
+  // Land at the top whenever a video page is opened or refreshed, so the player
+  // is front-and-centre for immediate watching. We disable the browser's scroll
+  // restoration (which otherwise re-applies the old offset on a hard reload)
+  // while on this page, then hand it back on the way out.
+  useEffect(() => {
+    const prev = history.scrollRestoration;
+    history.scrollRestoration = "manual";
+    window.scrollTo(0, 0);
+    return () => {
+      history.scrollRestoration = prev;
+    };
+  }, [id]);
+
   // Restore + persist the theater-mode preference (browser only).
   useEffect(() => {
     setTheater(localStorage.getItem("oasis:theater") === "1");
