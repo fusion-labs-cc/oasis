@@ -166,6 +166,57 @@ export default function VideoDetailPage() {
     localStorage.setItem("oasis:theater", theater ? "1" : "0");
   }, [theater]);
 
+  // Keep the player's keyboard controls predictable no matter what the user
+  // last touched: Space toggles play/pause, ←/→ seek, ↑/↓ adjust volume — even
+  // right after clicking a control button (fullscreen, settings…) or dragging
+  // the progress/volume sliders. We claim these keys in the capture phase and
+  // stop propagation so a focused control can't swallow Space to re-fire
+  // itself, and so Plyr's own global handler doesn't act twice.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const player = plyrRef.current;
+      if (!player) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // Don't hijack typing in the page's own inputs (tags, details…). Plyr's
+      // range inputs live inside `.plyr`, so those are still handled here.
+      const el = document.activeElement as HTMLElement | null;
+      if (
+        el &&
+        (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) &&
+        !el.closest(".plyr")
+      ) {
+        return;
+      }
+
+      switch (e.key) {
+        case " ":
+        case "k":
+        case "K":
+          player.togglePlay();
+          break;
+        case "ArrowLeft":
+          player.rewind();
+          break;
+        case "ArrowRight":
+          player.forward();
+          break;
+        case "ArrowUp":
+          player.increaseVolume(0.1);
+          break;
+        case "ArrowDown":
+          player.decreaseVolume(0.1);
+          break;
+        default:
+          return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
   // "t" toggles theater mode, YouTube-style (ignored while typing).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
