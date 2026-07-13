@@ -3,7 +3,7 @@
 __pycache__/
 /oasis/
 
-# Bundled Windows runtime (produced by build-runtime-win.sh, shipped in the zip,
+# Bundled Windows runtime (local portal bundle: python interpreter + ffmpeg,
 # never committed -- so `git pull` auto-updates only source, never the runtime)
 /python/
 /bin/

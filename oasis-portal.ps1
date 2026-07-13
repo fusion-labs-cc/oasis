@@ -1,6 +1,6 @@
 # Oasis - Backend Server Startup PowerShell Script
 #
-# This copy ships with a self-contained runtime built by build-runtime-win.sh:
+# This copy ships with a self-contained runtime bundled alongside the script:
 #   python\   Python 3.11 + all backend dependencies (no install needed)
 #   bin\ffmpeg.exe   static FFmpeg
 # So there is nothing to download or install on the user's machine except Google
