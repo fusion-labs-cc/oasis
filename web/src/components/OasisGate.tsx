@@ -343,6 +343,17 @@ export default function OasisGate() {
           <Link href="/licenses" className="transition hover:text-white/60">
             授權
           </Link>
+          <span aria-hidden className="text-white/15">
+            ·
+          </span>
+          <a
+            href="https://forms.gle/q4WhDeBxHkQu7TB8A"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition hover:text-white/60"
+          >
+            問題回饋
+          </a>
         </nav>
       </div>
     </div>

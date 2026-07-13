@@ -38,6 +38,15 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
               </span>
             ))}
             <span aria-hidden className="text-border-hairline">·</span>
+            <a
+              href="https://forms.gle/q4WhDeBxHkQu7TB8A"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="transition hover:text-accent"
+            >
+              問題回饋
+            </a>
+            <span aria-hidden className="text-border-hairline">·</span>
             <Link href="/" className="transition hover:text-accent">
               返回入口
             </Link>

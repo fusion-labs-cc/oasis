@@ -574,6 +574,33 @@ function UpdateSection() {
         </nav>
       </Field>
 
+      <Field
+        title="意見回饋"
+        description="使用中遇到解析失敗、下載錯誤或有任何建議，歡迎提交回饋表單。"
+      >
+        <a
+          href="https://forms.gle/q4WhDeBxHkQu7TB8A"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-accent transition hover:text-accent-hover"
+        >
+          <span>填寫回饋表單</span>
+          <svg
+            className="h-3.5 w-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <polyline points="15 3 21 3 21 9" />
+            <line x1="10" y1="14" x2="21" y2="3" />
+          </svg>
+        </a>
+      </Field>
+
       {/* Only after something went wrong — a healthy update needs no forensics.
           `error` covers the failed-swap, restart-timeout and download-error
           paths, all of which leave an account of themselves on disk. */}
