@@ -33,6 +33,7 @@ sys.path.insert(0, PROJECT_ROOT)
 import catalog
 import db_setup
 import site_config
+import version
 
 app = FastAPI(title='OASIS API')
 
@@ -149,6 +150,17 @@ class AnalyzeRequest(BaseModel):
 @app.get('/api/health')
 def health():
     return {'status': 'ok'}
+
+
+@app.get('/api/update/check')
+def update_check():
+    """Report this build's version and whether a newer GitHub Release exists.
+
+    Defined as a sync `def` so FastAPI runs the blocking GitHub request in a
+    threadpool. Failures are folded into the payload (never raise) so the
+    settings page degrades to "couldn't check" instead of erroring.
+    """
+    return version.check_for_update()
 
 
 @app.get('/api/supported-sites')

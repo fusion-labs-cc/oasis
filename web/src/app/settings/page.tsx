@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
+import { checkForUpdate, UpdateInfo } from "@/lib/api";
 import {
   defaultSettings,
   formatHotkey,
@@ -99,6 +100,121 @@ function Field({
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  );
+}
+
+type UpdateState =
+  | { phase: "loading" }
+  | { phase: "error"; message: string }
+  | { phase: "ready"; info: UpdateInfo };
+
+/**
+ * Shows the running build's version and, when the backend can reach GitHub,
+ * whether a newer release exists — with a direct download for this OS. The
+ * check runs against the user's local backend, so it fails soft: an
+ * unreachable backend or a blocked GitHub call just shows a "couldn't check"
+ * note with a manual retry rather than breaking the settings page.
+ */
+function UpdateSection() {
+  const [state, setState] = useState<UpdateState>({ phase: "loading" });
+
+  async function runCheck(signal?: AbortSignal) {
+    setState({ phase: "loading" });
+    try {
+      const info = await checkForUpdate(signal);
+      setState({ phase: "ready", info });
+    } catch {
+      if (signal?.aborted) return;
+      setState({
+        phase: "error",
+        message: "無法連線到後端，請確認 OASIS 後端正在執行後再試。",
+      });
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    runCheck(controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  const info = state.phase === "ready" ? state.info : null;
+  const checking = state.phase === "loading";
+
+  return (
+    <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">
+      <div className="pt-6">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+          關於與更新
+        </span>
+      </div>
+
+      <Field
+        title="目前版本"
+        description="此後端執行檔的版本。原始碼直接執行時會顯示為 dev。"
+      >
+        <span className="font-mono text-sm font-bold text-text-primary">
+          {checking ? "檢查中…" : info?.current ?? "—"}
+        </span>
+      </Field>
+
+      <Field
+        title="軟體更新"
+        description={
+          info?.update_available
+            ? "有新版本可用。下載後解壓縮覆蓋原資料夾即可，你的資料庫與影片會保留。"
+            : "檢查是否有新的發行版本。"
+        }
+      >
+        <div className="flex flex-col items-end gap-2">
+          {state.phase === "error" && (
+            <p className="max-w-[16rem] text-right text-xs text-amber-500">
+              {state.message}
+            </p>
+          )}
+          {info?.error && (
+            <p className="max-w-[16rem] text-right text-xs text-amber-500">
+              {info.error}
+            </p>
+          )}
+          {info && !info.error && (
+            <p className="text-xs text-text-tertiary">
+              {info.update_available ? (
+                <>
+                  最新版本{" "}
+                  <span className="font-mono font-bold text-accent">
+                    {info.latest}
+                  </span>
+                </>
+              ) : (
+                "已是最新版本"
+              )}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            {info?.update_available && (
+              <a
+                href={info.download_url ?? info.release_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-neutral-950 transition hover:bg-accent-hover shadow-[0_2px_10px_rgba(16,185,129,0.2)]"
+              >
+                下載更新
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => runCheck()}
+              disabled={checking}
+              className="rounded-lg border border-border-hairline bg-surface-highest px-4 py-2 text-xs font-bold text-text-secondary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
+            >
+              {checking ? "檢查中…" : "檢查更新"}
+            </button>
+          </div>
+        </div>
+      </Field>
+    </section>
   );
 }
 
@@ -235,6 +351,9 @@ export default function SettingsPage() {
           />
         </Field>
       </section>
+
+      {/* About & Updates */}
+      <UpdateSection />
 
       {/* Actions */}
       <div className="flex items-center justify-between">

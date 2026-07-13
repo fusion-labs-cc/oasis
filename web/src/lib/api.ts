@@ -88,6 +88,30 @@ export async function checkHealth(signal?: AbortSignal): Promise<boolean> {
   }
 }
 
+export interface UpdateInfo {
+  // This build's version ("dev" for an un-stamped source checkout).
+  current: string;
+  // Latest published release tag, or null when the check couldn't reach GitHub.
+  latest: string | null;
+  update_available: boolean;
+  // GitHub Releases page to open.
+  release_url: string;
+  // Direct download for this OS's asset, or null if unavailable.
+  download_url: string | null;
+  // Present when the check failed (network/API); the rest degrades gracefully.
+  error?: string;
+}
+
+// Ask the local backend to compare itself against the latest GitHub Release.
+export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> {
+  const res = await backendFetch("/api/update/check", {
+    cache: "no-store",
+    signal,
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface SupportedSite {
   id: string;
   name: string;

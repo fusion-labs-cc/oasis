@@ -35,6 +35,13 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pyinstaller
 
+      # Stamp the build with the tag that triggered it (branch name on a manual
+      # run). oasis-backend.spec bundles this file; version.py reads it back so
+      # the app can compare itself against the latest GitHub Release.
+      - name: Stamp version
+        shell: pwsh
+        run: Set-Content -Path VERSION -Value $env:GITHUB_REF_NAME -NoNewline
+
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec
 
@@ -78,6 +85,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
           pip install pyinstaller
+
+      # Stamp the build with the tag that triggered it (branch name on a manual
+      # run). oasis-backend.spec bundles this file; version.py reads it back so
+      # the app can compare itself against the latest GitHub Release.
+      - name: Stamp version
+        run: printf '%s' "$GITHUB_REF_NAME" > VERSION
 
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec

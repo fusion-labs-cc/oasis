@@ -25,6 +25,8 @@ chromedriver*
 /build/
 /dist/
 /oasis-backend-*.zip
+# Version stamp written at build time from the git tag (see release.yml).
+/VERSION
 
 # Node
 node_modules/

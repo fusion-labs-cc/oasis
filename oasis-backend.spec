@@ -7,6 +7,8 @@
 #     pip install -r backend/requirements.txt pyinstaller
 #     pyinstaller --noconfirm oasis-backend.spec
 #
+import os
+
 from PyInstaller.utils.hooks import collect_submodules
 
 # uvicorn[standard] resolves its loop/http/websocket implementations by dynamic
@@ -24,6 +26,12 @@ hiddenimports = (
 datas = [
     ('backend/sites', 'sites'),
 ]
+
+# CI writes VERSION (the git tag) at the repo root before building; bundle it at
+# the app root so version.py can read the shipped build's version. Absent in a
+# plain source build, in which case the app reports "dev".
+if os.path.exists('VERSION'):
+    datas.append(('VERSION', '.'))
 
 a = Analysis(
     ['backend/run_backend.py'],
