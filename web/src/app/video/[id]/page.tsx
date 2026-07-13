@@ -41,6 +41,9 @@ export default function VideoDetailPage() {
   const theaterBtnRef = useRef<HTMLButtonElement | null>(null);
   const theaterRef = useRef(false);
   const playLogged = useRef(false);
+  // Set when we intentionally navigate away (e.g. after deleting), so the
+  // "video not found" effect doesn't fire a spurious toast on the way out.
+  const leaving = useRef(false);
 
   const isDownloading = downloading || video?.is_downloading;
 
@@ -144,6 +147,7 @@ export default function VideoDetailPage() {
         setDeleting(false);
         setConfirmingDelete(false);
       } else {
+        leaving.current = true;
         removeVideo(video.id);
         router.push("/");
       }
@@ -354,6 +358,9 @@ export default function VideoDetailPage() {
       setError(null);
       return;
     }
+    // We just deleted this record and are navigating home; don't treat the now
+    // missing record as a "video not found" case.
+    if (leaving.current) return;
     if (!loaded) {
       // Catalog still loading; wait for it rather than double-fetching.
       setLoading(true);
@@ -362,11 +369,16 @@ export default function VideoDetailPage() {
     setLoading(true);
     syncVideo(numId)
       .then((v) => {
-        if (!v) setError("該影片不存在或已被刪除。");
+        if (!v) {
+          // Deep link / manual URL to a video that doesn't exist: send the user
+          // home with a toast rather than parking them on an error page.
+          toast("該影片不存在或已被刪除。", { type: "error" });
+          router.replace("/");
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [status, video, loaded, numId, syncVideo]);
+  }, [status, video, loaded, numId, syncVideo, router, toast]);
 
   // Reflect the video code in the tab title: "[code] - OASIS".
   useEffect(() => {
