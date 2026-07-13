@@ -406,9 +406,8 @@ export default function VideoDetailPage() {
 
   if (loading && !video) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-8 py-12 animate-pulse">
-        <div className="mb-6 h-4.5 w-24 bg-surface-elevated rounded" />
-        <div className="aspect-video w-full bg-surface-elevated rounded-2xl" />
+      <main className="mx-auto w-full max-w-7xl px-8 py-6 animate-pulse">
+        <div className="mx-auto aspect-video w-full max-w-[calc((100vh-8rem)*16/9)] bg-surface-elevated rounded-2xl" />
         <div className="mt-8 rounded-2xl border border-border-hairline bg-surface-elevated p-6 space-y-6">
           <div className="flex justify-between items-center pb-4 border-b border-border-hairline">
             <div className="h-6 w-32 bg-surface-highest rounded" />
@@ -425,13 +424,7 @@ export default function VideoDetailPage() {
 
   if (error || !video) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-8 py-12">
-        <button
-          onClick={() => router.push("/")}
-          className="mb-6 inline-flex items-center gap-1.5 text-xs font-semibold text-text-secondary hover:text-accent transition group cursor-pointer"
-        >
-          <span className="transition-transform group-hover:-translate-x-0.5">←</span> 返回影片庫
-        </button>
+      <main className="mx-auto w-full max-w-7xl px-8 py-6">
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-sm text-red-400 font-sans leading-relaxed">
           <div className="flex items-center gap-2 font-semibold mb-1">
             <span>✕</span>
@@ -444,22 +437,14 @@ export default function VideoDetailPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-8 py-12">
-      {/* Back Button */}
-      <button
-        onClick={() => router.push("/")}
-        className="mb-6 inline-flex items-center gap-1.5 text-xs font-semibold text-text-secondary hover:text-accent transition group cursor-pointer"
-      >
-        <span className="transition-transform group-hover:-translate-x-0.5">←</span> 返回影片庫
-      </button>
-
+    <main className="mx-auto w-full max-w-7xl px-8 py-6">
       {/* Video Player */}
       {video.video_path && video.local_file_exists ? (
         <div
           className={
             theater
               ? "theater relative left-1/2 w-screen -translate-x-1/2 bg-black"
-              : "overflow-hidden rounded-2xl bg-black shadow-2xl border border-border-hairline"
+              : "player-shell overflow-hidden rounded-2xl bg-black shadow-2xl border border-border-hairline"
           }
         >
           <div className={theater ? "mx-auto" : ""}>
@@ -468,7 +453,7 @@ export default function VideoDetailPage() {
               controls
               autoPlay={false}
               onPlay={handlePlay}
-              className="w-full aspect-video outline-none"
+              className="mx-auto w-full aspect-video max-h-[calc(100vh-8rem)] max-w-[calc((100vh-8rem)*16/9)] outline-none"
               src={backendUrl(`/api/stream/${video.id}`)}
               poster={video.cover || undefined}
             >
@@ -479,7 +464,7 @@ export default function VideoDetailPage() {
       ) : null}
 
       {(!video.video_path || !video.local_file_exists) && (
-        <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
+        <div className="relative mx-auto aspect-video w-full max-h-[calc(100vh-8rem)] max-w-[calc((100vh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
           {video.cover && (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}

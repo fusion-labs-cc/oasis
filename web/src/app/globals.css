@@ -103,6 +103,15 @@ dialog[open] {
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
+/* Standard mode: cap the player to the viewport so the whole video is visible
+   without scrolling. Plyr resizes the raw <video> after init, so match the
+   Tailwind cap here on the generated .plyr container. */
+.player-shell .plyr {
+  margin-inline: auto;
+  max-height: calc(100vh - 8rem);
+  max-width: calc((100vh - 8rem) * 16 / 9);
+}
+
 /* Theater mode: full-bleed width, cap height to viewport */
 .theater .plyr {
   margin-inline: auto;
