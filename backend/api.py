@@ -88,6 +88,37 @@ def _init_db():
     asyncio.create_task(_bg_check_analyses())
 
 
+@app.on_event('shutdown')
+def _cleanup_processes():
+    """Terminate any lingering child processes and close their queues on a clean
+    server shutdown. Without this, every unfinished analysis leaves a
+    multiprocessing.Queue open, whose 3 semaphores leak and trigger the
+    resource_tracker "leaked semaphore objects" warning at exit.
+
+    Downloads are terminated *without* dropping a cancel marker, so the worker's
+    SIGTERM handler keeps partial segments on disk and the download resumes on
+    the next start."""
+    for item in list(active_analyses.values()):
+        proc = item.get('process')
+        if proc is not None and proc.is_alive():
+            proc.terminate()
+            proc.join()
+        rq = item.get('result_queue')
+        if rq is not None:
+            try:
+                rq.close()
+                rq.join_thread()
+            except Exception:
+                pass
+    active_analyses.clear()
+
+    for proc in list(active_downloads.values()):
+        if proc.is_alive():
+            proc.terminate()
+            proc.join()
+    active_downloads.clear()
+
+
 def _resume_pending_downloads():
     """Re-queue downloads that were requested but never finished before the last
     shutdown/restart. In-memory queue state is volatile (a code edit under
@@ -162,8 +193,16 @@ async def _bg_check_analyses():
                         item["status"] = "error"
                         item["error"] = "分析已被取消或中斷"
 
-                    # Clean up process
+                    # Clean up process and release the queue's semaphores.
+                    # A multiprocessing.Queue holds 3 semaphores (_rlock,
+                    # _wlock, _sem); if we never close it they leak and the
+                    # resource_tracker warns about them at server shutdown.
                     proc.join()
+                    try:
+                        result_queue.close()
+                        result_queue.join_thread()
+                    except Exception:
+                        pass
 
             # Advance the serial download pipeline: reap the finished download
             # and start the next queued one.
