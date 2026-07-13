@@ -521,7 +521,12 @@ foreach ($path in @($Staging, $Trash, $Zip)) {{
 Log '=== done ==='
 """
     path = os.path.join(work, "apply-update.ps1")
-    with open(path, "w", encoding="utf-8") as f:
+    # utf-8-sig (BOM), not plain utf-8: PowerShell 5.1 decodes a BOM-less .ps1 as
+    # the system ANSI codepage (cp950 on a Chinese Windows, etc.), which mangles
+    # the non-ASCII text in this script — and mojibake that happens to contain a
+    # quote or backtick turns a comment into a syntax error. The BOM makes it read
+    # the file as UTF-8.
+    with open(path, "w", encoding="utf-8-sig") as f:
         f.write(script)
     return path
 
@@ -529,21 +534,33 @@ Log '=== done ==='
 def _spawn_detached(script: str) -> None:
     """Launch the helper so it outlives this process.
 
-    On Windows the backend may be running inside a Job object (some launchers and
-    terminals create one with KILL_ON_JOB_CLOSE). DETACHED_PROCESS only gives the
-    child its own console -- it does NOT remove it from that job, so the instant
-    this backend exits, the job closes and the "detached" helper is killed before
-    it runs a single line: no update.log, no swap, no relaunch. CREATE_BREAKAWAY_FROM_JOB
-    pulls the helper out of the job so it survives. If the job forbids breakaway
-    (no JOB_OBJECT_LIMIT_BREAKAWAY_OK), CreateProcess fails with that flag, so we
-    retry without it.
+    Two Windows flags matter here, and getting the first one wrong is what made
+    the auto-update silently do nothing:
+
+      * CREATE_NO_WINDOW, *not* DETACHED_PROCESS. DETACHED_PROCESS gives the child
+        no console at all, and powershell.exe simply will not run without one: it
+        exits immediately with code 0, having executed not a single line of the
+        -File script. No update.log, no swap, no relaunch, no error — the backend
+        just sat there on "installing" and came back on the old version, which is
+        exactly the "更新未生效" the user saw. CREATE_NO_WINDOW gives the helper a
+        console but no visible window, which is what we actually wanted: invisible
+        *and* running. (Verified with a spawn probe on Windows PowerShell 5.1.)
+      * CREATE_BREAKAWAY_FROM_JOB, because the backend may be running inside a Job
+        object (some launchers and terminals create one with KILL_ON_JOB_CLOSE).
+        A child stays in the parent's job, so the instant this backend is killed
+        the job closes and takes the helper with it. Breakaway pulls it out. If
+        the job forbids breakaway (no JOB_OBJECT_LIMIT_BREAKAWAY_OK) CreateProcess
+        fails with that flag, so we retry without it.
+
+    The helper outliving this process needs neither flag — a Windows child is not
+    killed when its parent dies — only the job and the console are hazards.
     """
     if sys.platform == "win32":
-        DETACHED_PROCESS = 0x00000008
+        CREATE_NO_WINDOW = 0x08000000
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         CREATE_BREAKAWAY_FROM_JOB = 0x01000000
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
-        base_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        base_flags = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
         # Capture the helper's own stdout/stderr to a file (not DEVNULL): if
         # powershell is blocked or killed the instant it launches (e.g. antivirus
         # objecting to a spawned `-ExecutionPolicy Bypass -File` helper), it never
