@@ -36,11 +36,14 @@ jobs:
           pip install pyinstaller
 
       # Stamp the build with the tag that triggered it (branch name on a manual
-      # run). oasis-backend.spec bundles this file; version.py reads it back so
-      # the app can compare itself against the latest GitHub Release.
-      - name: Stamp version
+      # run) and the release asset this job produces. oasis-backend.spec bundles
+      # both files; version.py reads them back so the app can compare itself
+      # against the latest GitHub Release and download the matching OS build.
+      - name: Stamp version and platform
         shell: pwsh
-        run: Set-Content -Path VERSION -Value $env:GITHUB_REF_NAME -NoNewline
+        run: |
+          Set-Content -Path VERSION -Value $env:GITHUB_REF_NAME -NoNewline
+          Set-Content -Path PLATFORM -Value 'oasis-backend-win64.zip' -NoNewline
 
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec
@@ -87,10 +90,13 @@ jobs:
           pip install pyinstaller
 
       # Stamp the build with the tag that triggered it (branch name on a manual
-      # run). oasis-backend.spec bundles this file; version.py reads it back so
-      # the app can compare itself against the latest GitHub Release.
-      - name: Stamp version
-        run: printf '%s' "$GITHUB_REF_NAME" > VERSION
+      # run) and the release asset this job produces. oasis-backend.spec bundles
+      # both files; version.py reads them back so the app can compare itself
+      # against the latest GitHub Release and download the matching OS build.
+      - name: Stamp version and platform
+        run: |
+          printf '%s' "$GITHUB_REF_NAME" > VERSION
+          printf '%s' 'oasis-backend-macos-arm64.zip' > PLATFORM
 
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec

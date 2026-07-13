@@ -29,11 +29,18 @@ const CONFIG = {
   boostFactor: 0.3, // mote rise-time multiplier while boosting (smaller = faster)
 };
 
-// Where a new visitor can download the OASIS portal bundle (the win64 zip).
-// Set NEXT_PUBLIC_PORTAL_DOWNLOAD_URL to a shareable link — e.g. a Google Drive
-// "anyone with the link" file. When unset, the download prompt is hidden so the
-// gate stays minimal. Inlined at build time (must be NEXT_PUBLIC_).
-const PORTAL_DOWNLOAD_URL = process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL || "";
+// Where a new visitor can download the OASIS portal bundle. The release ships a
+// macOS and a Windows build; the gate offers both and lets the visitor pick.
+// Set per-OS shareable links — e.g. Google Drive "anyone with the link" files:
+//   NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_MAC  → macos-arm64 zip
+//   NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_WIN  → win64 zip
+// Each link that is set renders its own button; unset ones are hidden. When
+// neither is set the prompt is hidden so the gate stays minimal. Inlined at
+// build time (must be NEXT_PUBLIC_).
+const PORTAL_DOWNLOADS: { label: string; url: string }[] = [
+  { label: "macOS", url: process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_MAC || "" },
+  { label: "Windows", url: process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_WIN || "" },
+].filter((d) => d.url);
 
 export default function OasisGate() {
   const { status, downReason, backendUrl, updateBackendUrl } = useBackend();
@@ -279,29 +286,40 @@ export default function OasisGate() {
 
       {/* Quiet "get the portal" footer — only while gated (never during the
           connect/reveal), so a new visitor without the bundle can grab it
-          without cluttering the connection form. */}
-      {PORTAL_DOWNLOAD_URL && status === "down" && (
-        <a
-          href={PORTAL_DOWNLOAD_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="group absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/30 transition hover:text-white/70"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-3.5 w-3.5 transition group-hover:translate-y-0.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 3v12" />
-            <path d="m7 10 5 5 5-5" />
-            <path d="M5 21h14" />
-          </svg>
-          還沒有綠洲？下載入口程式
-        </a>
+          without cluttering the connection form. Both platform builds are shown
+          side by side so the visitor picks their own OS. */}
+      {PORTAL_DOWNLOADS.length > 0 && status === "down" && (
+        <div className="absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2">
+          <span className="text-[11px] tracking-[0.15em] text-white/30">
+            還沒有綠洲？下載入口程式
+          </span>
+          <div className="flex items-center gap-4">
+            {PORTAL_DOWNLOADS.map((d) => (
+              <a
+                key={d.label}
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 transition hover:text-white/80"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-3.5 w-3.5 transition group-hover:translate-y-0.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 3v12" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M5 21h14" />
+                </svg>
+                {d.label}
+              </a>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

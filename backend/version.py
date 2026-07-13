@@ -19,26 +19,29 @@ import urllib.request
 # GitHub API / download URLs below.
 GITHUB_REPO = "fusion-labs-cc/oasis"
 
-# The per-OS release asset names produced by .github/workflows/release.yml.
+# Fallback map from sys.platform to the release asset name, used only when the
+# build carries no PLATFORM stamp (source checkout, or a build made before CI
+# started stamping). The stamped value is authoritative — see _asset_name_for_os.
 _ASSET_BY_PLATFORM = {
     "win32": "oasis-backend-win64.zip",
     "darwin": "oasis-backend-macos-arm64.zip",
 }
 
 
-def app_version() -> str:
-    """This build's version string, or "dev" for an un-stamped source checkout.
+def _bundled_file(name: str) -> str | None:
+    """Read a CI-stamped file bundled into the build, or None if absent/empty.
 
-    Looks for a VERSION file in, in order: the frozen bundle root (_MEIPASS),
-    the repo root (one level above backend/), and this package dir.
+    Looks in, in order: the frozen bundle root (_MEIPASS), the repo root (one
+    level above backend/), and this package dir. CI writes these (VERSION,
+    PLATFORM) at the repo root before freezing; oasis-backend.spec bundles them.
     """
     candidates = []
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidates.append(os.path.join(meipass, "VERSION"))
+        candidates.append(os.path.join(meipass, name))
     here = os.path.abspath(os.path.dirname(__file__))
-    candidates.append(os.path.abspath(os.path.join(here, "..", "VERSION")))
-    candidates.append(os.path.join(here, "VERSION"))
+    candidates.append(os.path.abspath(os.path.join(here, "..", name)))
+    candidates.append(os.path.join(here, name))
     for path in candidates:
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -47,7 +50,12 @@ def app_version() -> str:
             continue
         if value:
             return value
-    return "dev"
+    return None
+
+
+def app_version() -> str:
+    """This build's version string, or "dev" for an un-stamped source checkout."""
+    return _bundled_file("VERSION") or "dev"
 
 
 def _parse_version(value: str | None) -> tuple[int, ...] | None:
@@ -75,7 +83,13 @@ def _is_newer(latest: str | None, current: str | None) -> bool:
 
 
 def _asset_name_for_os() -> str | None:
-    return _ASSET_BY_PLATFORM.get(sys.platform)
+    """The release asset to download when updating this build.
+
+    Prefers the exact asset name CI stamped into the build (PLATFORM file), so
+    the updater fetches the same variant it was installed as. Falls back to a
+    sys.platform guess for un-stamped builds.
+    """
+    return _bundled_file("PLATFORM") or _ASSET_BY_PLATFORM.get(sys.platform)
 
 
 def check_for_update(timeout: float = 6.0) -> dict:

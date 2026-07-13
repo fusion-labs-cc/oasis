@@ -27,11 +27,14 @@ datas = [
     ('backend/sites', 'sites'),
 ]
 
-# CI writes VERSION (the git tag) at the repo root before building; bundle it at
-# the app root so version.py can read the shipped build's version. Absent in a
-# plain source build, in which case the app reports "dev".
-if os.path.exists('VERSION'):
-    datas.append(('VERSION', '.'))
+# CI writes VERSION (the git tag) and PLATFORM (the release asset name for this
+# OS) at the repo root before building; bundle them at the app root so version.py
+# can read the shipped build's version and pick the matching update asset. Absent
+# in a plain source build, in which case the app reports "dev" and the updater
+# falls back to a sys.platform guess.
+for _stamp in ('VERSION', 'PLATFORM'):
+    if os.path.exists(_stamp):
+        datas.append((_stamp, '.'))
 
 a = Analysis(
     ['backend/run_backend.py'],
