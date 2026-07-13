@@ -30,6 +30,13 @@ html.oasis-authed:not(.oasis-hydrated) .oasis-gate {
   display: none !important;
 }
 
+/* The app UI is desktop-only, so <body> carries a 1024px floor. The public legal
+   pages are the one part of the site a stranger may open on a phone, so they opt
+   out of that floor and stay fluid. */
+body:has(.legal-page) {
+  min-width: 0;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

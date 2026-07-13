@@ -3,6 +3,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useBackend } from "@/context/BackendContext";
 import { getAuthorized } from "@/lib/backend";
 
@@ -284,43 +285,66 @@ export default function OasisGate() {
         </div>
       </div>
 
-      {/* Quiet "get the portal" footer — only while gated (never during the
-          connect/reveal), so a new visitor without the bundle can grab it
-          without cluttering the connection form. Both platform builds are shown
-          side by side so the visitor picks their own OS. */}
-      {PORTAL_DOWNLOADS.length > 0 && status === "down" && (
-        <div className="absolute bottom-8 left-1/2 z-10 flex -translate-x-1/2 flex-col items-center gap-2">
-          <span className="text-[11px] tracking-[0.15em] text-white/30">
-            還沒有綠洲？下載入口程式
-          </span>
-          <div className="flex items-center gap-4">
-            {PORTAL_DOWNLOADS.map((d) => (
-              <a
-                key={d.label}
-                href={d.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 transition hover:text-white/80"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-3.5 w-3.5 transition group-hover:translate-y-0.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+      {/* Quiet footer. The download prompt only appears while gated (never during
+          the connect/reveal), so a new visitor without the bundle can grab it
+          without cluttering the connection form; both platform builds are shown
+          side by side so the visitor picks their own OS. The legal links sit
+          below it and are always present — they are the only way in to /terms,
+          /privacy and /licenses from outside the gate, and the FFmpeg notices on
+          /licenses have to stay reachable by anyone offered a download here. */}
+      <div className="absolute inset-x-0 bottom-6 z-10 flex flex-col items-center gap-5 px-6">
+        {PORTAL_DOWNLOADS.length > 0 && status === "down" && (
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-[11px] tracking-[0.15em] text-white/30">
+              還沒有綠洲？下載入口程式
+            </span>
+            <div className="flex items-center gap-4">
+              {PORTAL_DOWNLOADS.map((d) => (
+                <a
+                  key={d.label}
+                  href={d.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 transition hover:text-white/80"
                 >
-                  <path d="M12 3v12" />
-                  <path d="m7 10 5 5 5-5" />
-                  <path d="M5 21h14" />
-                </svg>
-                {d.label}
-              </a>
-            ))}
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-3.5 w-3.5 transition group-hover:translate-y-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 3v12" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M5 21h14" />
+                  </svg>
+                  {d.label}
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
+        <nav className="flex items-center gap-3 text-[10px] tracking-[0.15em] text-white/25">
+          <Link href="/terms" className="transition hover:text-white/60">
+            使用條款
+          </Link>
+          <span aria-hidden className="text-white/15">
+            ·
+          </span>
+          <Link href="/privacy" className="transition hover:text-white/60">
+            隱私權
+          </Link>
+          <span aria-hidden className="text-white/15">
+            ·
+          </span>
+          <Link href="/licenses" className="transition hover:text-white/60">
+            授權
+          </Link>
+        </nav>
+      </div>
     </div>
   );
 }

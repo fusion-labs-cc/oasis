@@ -1,13 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { ToastProvider } from "@/components/Toast";
-import { BackendProvider } from "@/context/BackendContext";
-import { VideoProvider } from "@/context/VideoContext";
-import { TasksProvider } from "@/context/TasksContext";
-import Header from "@/components/Header";
-import AwakeMode from "@/components/AwakeMode";
-import OasisGate from "@/components/OasisGate";
-import ScrollToTop from "@/components/ScrollToTop";
+import SiteChrome from "@/components/SiteChrome";
 import "./globals.css";
 
 // This UI is predominantly Chinese (CJK), which the Latin-subset Geist webfonts
@@ -59,19 +52,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full min-w-[1024px] flex flex-col bg-background text-foreground">
-        <BackendProvider>
-          <VideoProvider>
-            <TasksProvider>
-              <ToastProvider>
-                <Header />
-                {children}
-                <ScrollToTop />
-                <OasisGate />
-                <AwakeMode />
-              </ToastProvider>
-            </TasksProvider>
-          </VideoProvider>
-        </BackendProvider>
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );

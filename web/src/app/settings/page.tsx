@@ -546,6 +546,34 @@ function UpdateSection() {
         </div>
       </Field>
 
+      {/* The app itself carries no legal footer — behind the gate the only reader
+          is the owner, who has already been through it. This is the one place
+          inside the app that links out to the public pages, next to the version
+          and update controls they belong with. */}
+      <Field
+        title="條款與授權"
+        description="使用條款與免責聲明、隱私權政策，以及第三方元件的授權與致謝。"
+      >
+        <nav className="flex items-center gap-3 text-xs text-text-tertiary">
+          {[
+            { href: "/terms", label: "使用條款" },
+            { href: "/privacy", label: "隱私權" },
+            { href: "/licenses", label: "授權與致謝" },
+          ].map((l, i) => (
+            <span key={l.href} className="flex items-center gap-3">
+              {i > 0 && (
+                <span aria-hidden className="text-border-hairline">
+                  ·
+                </span>
+              )}
+              <Link href={l.href} className="transition hover:text-accent">
+                {l.label}
+              </Link>
+            </span>
+          ))}
+        </nav>
+      </Field>
+
       {/* Only after something went wrong — a healthy update needs no forensics.
           `error` covers the failed-swap, restart-timeout and download-error
           paths, all of which leave an account of themselves on disk. */}
