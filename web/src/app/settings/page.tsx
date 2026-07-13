@@ -9,8 +9,10 @@ import {
   applyUpdate,
   checkForUpdate,
   checkHealth,
+  fetchUpdateLogs,
   fetchUpdateProgress,
   UpdateInfo,
+  UpdateLogs,
   UpdateProgress,
 } from "@/lib/api";
 import {
@@ -111,6 +113,133 @@ function Field({
 }
 
 /**
+ * Flatten the update diagnostics into one plain-text blob — what the user pastes
+ * into a bug report. Mirrors what's rendered below, so a report carries the same
+ * evidence we'd have asked them to go dig out of the install folder by hand.
+ */
+function formatLogs(logs: UpdateLogs): string {
+  const head = [
+    `version: ${logs.version}`,
+    `platform: ${logs.platform} (asset: ${logs.platform_stamp ?? "未標記"})`,
+    `frozen: ${logs.frozen}  pid: ${logs.pid}`,
+    `install: ${logs.base}`,
+    `progress: ${JSON.stringify(logs.progress)}`,
+    "",
+    "安裝資料夾內容：",
+    ...logs.install_entries.map(
+      (e) => `  ${e.modified ?? "?"}  ${e.name}`,
+    ),
+  ];
+  const files = logs.files.map((f) =>
+    [
+      `\n===== ${f.name} (${f.modified ?? "不存在"}) =====`,
+      f.text ?? "（沒有這個檔案）",
+    ].join("\n"),
+  );
+  return [...head, ...files].join("\n");
+}
+
+/**
+ * The update log files, shown after an update fails.
+ *
+ * An update runs across three processes — the backend that downloads, the helper
+ * that swaps the files, and the backend that relaunches — and by the time the
+ * user is looking at "更新未生效", the two that know what went wrong are gone.
+ * All they leave behind are logs in the install folder, so we read them back out
+ * here rather than asking the user to go find a dotfolder. The install-folder
+ * listing is part of the evidence: an exe whose mtime predates the update means
+ * the swap never happened (locked file), not that the download failed.
+ */
+function UpdateDiagnostics({
+  logs,
+  logsError,
+  loading,
+  onReload,
+}: {
+  logs: UpdateLogs | null;
+  logsError: string | null;
+  loading: boolean;
+  onReload: () => void;
+}) {
+  const toast = useToast();
+
+  return (
+    <details className="border-t border-border-hairline py-4" open={!!logs}>
+      <summary className="cursor-pointer text-xs font-bold text-text-secondary transition hover:text-text-primary">
+        更新診斷紀錄
+      </summary>
+
+      <div className="mt-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onReload}
+          disabled={loading}
+          className="rounded-lg border border-border-hairline bg-surface-highest px-3 py-1.5 text-[11px] font-bold text-text-secondary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
+        >
+          {loading ? "讀取中…" : "重新讀取"}
+        </button>
+        {logs && (
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(formatLogs(logs))
+                .then(() => toast("已複製診斷紀錄", { type: "success" }))
+                .catch(() => toast("複製失敗", { type: "error" }));
+            }}
+            className="rounded-lg border border-border-hairline bg-surface-highest px-3 py-1.5 text-[11px] font-bold text-text-secondary transition hover:text-text-primary cursor-pointer"
+          >
+            複製全部
+          </button>
+        )}
+      </div>
+
+      {logsError && (
+        <p className="mt-3 text-xs text-amber-500">{logsError}</p>
+      )}
+
+      {logs && (
+        <div className="mt-3 space-y-3">
+          <p className="font-mono text-[11px] leading-relaxed text-text-tertiary">
+            版本 {logs.version} · {logs.platform} ·{" "}
+            {logs.platform_stamp ?? "未標記安裝檔"}
+            <br />
+            安裝位置：{logs.base}
+          </p>
+
+          {logs.files.map((file) => (
+            <div key={file.name}>
+              <p className="mb-1 font-mono text-[11px] font-bold text-text-secondary">
+                {file.name}
+                {file.modified && (
+                  <span className="ml-2 font-normal text-text-tertiary">
+                    {file.modified}
+                  </span>
+                )}
+              </p>
+              <pre className="max-h-64 overflow-auto rounded-lg bg-surface-highest p-3 font-mono text-[10px] leading-relaxed text-text-tertiary whitespace-pre-wrap break-all">
+                {file.text ?? "（沒有這個檔案 — 這個步驟沒有執行到）"}
+              </pre>
+            </div>
+          ))}
+
+          <div>
+            <p className="mb-1 font-mono text-[11px] font-bold text-text-secondary">
+              安裝資料夾
+            </p>
+            <pre className="max-h-48 overflow-auto rounded-lg bg-surface-highest p-3 font-mono text-[10px] leading-relaxed text-text-tertiary">
+              {logs.install_entries
+                .map((e) => `${e.modified ?? "?"}  ${e.name}`)
+                .join("\n")}
+            </pre>
+          </div>
+        </div>
+      )}
+    </details>
+  );
+}
+
+/**
  * Shows the running build's version and, when the backend can reach GitHub,
  * whether a newer release exists — with a direct download for this OS. The
  * check runs against the user's local backend, so it fails soft: an
@@ -134,7 +263,28 @@ function UpdateSection() {
   // Download progress 0..100 while phase === "downloading", or -1 when the
   // download size is unknown (shown as an indeterminate state).
   const [percent, setPercent] = useState(0);
+  // Update log files + install-folder state, loaded on demand when an update
+  // fails (the failure happened in processes that no longer exist, so the logs
+  // on disk are the only account of it).
+  const [logs, setLogs] = useState<UpdateLogs | null>(null);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [loadingLogs, setLoadingLogs] = useState(false);
   const updating = phase !== null;
+
+  async function loadLogs() {
+    setLoadingLogs(true);
+    setLogsError(null);
+    try {
+      setLogs(await fetchUpdateLogs());
+    } catch (e) {
+      setLogs(null);
+      setLogsError(
+        e instanceof Error ? e.message : "無法讀取更新紀錄（後端沒有回應）。",
+      );
+    } finally {
+      setLoadingLogs(false);
+    }
+  }
 
   async function runCheck(signal?: AbortSignal) {
     setChecking(true);
@@ -199,6 +349,8 @@ function UpdateSection() {
   async function runUpdate() {
     setError(null);
     setSuccess(null);
+    setLogs(null);
+    setLogsError(null);
     setPercent(0);
     setPhase("downloading");
     // The version we're updating to, so we can confirm the relaunched backend is
@@ -233,6 +385,10 @@ function UpdateSection() {
       setError(
         "後端重新啟動逾時，更新可能未完成。請手動重新啟動 OASIS；若版本仍未變更，請改用下方「手動下載」安裝。",
       );
+      // The backend is (probably) down, so this likely fails too — but if the
+      // helper did relaunch it and we just gave up too early, the logs load and
+      // say exactly that, which is worth the one request.
+      void loadLogs();
       return;
     }
 
@@ -248,13 +404,17 @@ function UpdateSection() {
         setSuccess(`已更新到 ${fresh.current}`);
       } else {
         setError(
-          `更新未生效：目前仍是 ${fresh.current}。請改用下方「手動下載」安裝；` +
-            "若在 Windows，可查看安裝資料夾中的 .oasis-update\\update.log 了解原因。",
+          `更新未生效：目前仍是 ${fresh.current}（預期 ${target ?? "新版本"}）。` +
+            "檔案置換沒有成功，請展開下方的「更新診斷紀錄」查看原因，或改用「手動下載」安裝。",
         );
+        // Pull the logs straight away: this is the failure we most need an
+        // account of, and the newly relaunched backend can read them off disk.
+        void loadLogs();
       }
     } catch {
       setPhase(null);
       setError("後端已重新啟動，但無法確認版本。請重新整理頁面並再次「檢查更新」確認。");
+      void loadLogs();
     }
   }
 
@@ -385,6 +545,18 @@ function UpdateSection() {
           )}
         </div>
       </Field>
+
+      {/* Only after something went wrong — a healthy update needs no forensics.
+          `error` covers the failed-swap, restart-timeout and download-error
+          paths, all of which leave an account of themselves on disk. */}
+      {error && !updating && (
+        <UpdateDiagnostics
+          logs={logs}
+          logsError={logsError}
+          loading={loadingLogs}
+          onReload={() => void loadLogs()}
+        />
+      )}
     </section>
   );
 }

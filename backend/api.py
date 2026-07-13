@@ -187,6 +187,19 @@ def update_progress():
     return updater.get_progress()
 
 
+@app.get('/api/update/logs')
+def update_logs():
+    """Diagnostics for an update that didn't take, served to the settings page.
+
+    The update spans this process, a helper script and the relaunched backend, so
+    when it silently fails ("更新未生效") the evidence is spread over log files in
+    the install folder that the user would otherwise have to go dig up by hand.
+    They survive the swap, so the *new* backend can just read them back out.
+    """
+    import updater
+    return updater.collect_logs()
+
+
 @app.get('/api/supported-sites')
 def supported_sites():
     """List the sites the URL analyser currently supports (for the UI).

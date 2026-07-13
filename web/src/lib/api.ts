@@ -157,6 +157,39 @@ export async function fetchUpdateProgress(
   return res.json();
 }
 
+export interface UpdateLogFile {
+  // One of updater.log / update.log / helper-output.log / backend.log.
+  name: string;
+  modified: string | null;
+  // Tail of the file, or null when it doesn't exist (e.g. no update was run).
+  text: string | null;
+}
+
+export interface UpdateLogs {
+  version: string;
+  platform: string;
+  platform_stamp: string | null;
+  frozen: boolean;
+  pid: number;
+  // Install folder, and the .oasis-update work folder inside it.
+  base: string;
+  work: string;
+  progress: UpdateProgress;
+  // Top-level contents of the install folder with mtimes — an old mtime on the
+  // exe / _internal after an "update" means the file swap never happened.
+  install_entries: { name: string; modified: string | null }[];
+  files: UpdateLogFile[];
+}
+
+// Fetch the update log files + install-folder state from the backend. Used to
+// explain a failed update (see the settings page), which happens across
+// processes that are gone by the time the user sees the failure.
+export async function fetchUpdateLogs(): Promise<UpdateLogs> {
+  const res = await backendFetch("/api/update/logs", { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export interface SupportedSite {
   id: string;
   name: string;
