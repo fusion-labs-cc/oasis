@@ -4,15 +4,21 @@
 Apply an in-app update for the frozen (PyInstaller onedir) build.
 
 The settings page can already *check* GitHub Releases (see version.py). This
-module performs the actual swap: download the new build's zip, then hand off to
-a small OS-native helper script that waits for this backend to exit, replaces
-the app files in place, and relaunches the new backend.
+module performs the actual swap: the download runs in a background thread and
+reports progress (polled via /api/update/progress), then it hands off to a
+small OS-native helper script that stops this backend, replaces the app files
+in place, and relaunches the new backend.
+
+The backend does NOT exit on its own: it stays up and serving throughout the
+download, and it is the *helper* that kills this process once the download is
+done — this backend never terminates itself. That keeps the "downloading →
+installing → restarting" progress reachable right up to the handoff.
 
 Why a helper script and not plain Python:
 
   * A running process cannot overwrite its own executable / loaded libraries
     (hard error on Windows, and `_internal/` holds the frozen Python itself), so
-    the swap must happen *after* this process exits.
+    the swap must happen *after* this process is gone.
   * The helper is OS-native (sh / PowerShell) so it can keep running once this
     process is gone, and so extraction uses `ditto`/`unzip`/`Expand-Archive`,
     which preserve the macOS bundle's symlinks and exec bits that Python's
@@ -37,9 +43,39 @@ import version
 # helper script, and its log. Kept out of the way with a leading dot.
 _WORK_DIRNAME = ".oasis-update"
 
-# Grace period after responding before this process exits, so the HTTP response
-# reaches the browser first. The helper is already spawned and blocks on our PID.
-_SHUTDOWN_DELAY_S = 1.5
+# How long the helper waits after being spawned before it kills this backend.
+# The gap lets the "installing" phase reach the polling UI and the last HTTP
+# response flush before this process's files unlock for the swap.
+_HANDOFF_GRACE_S = 1.5
+
+# Shared state for the in-flight update, polled by /api/update/progress. Guarded
+# by _lock since the download runs in a background thread. Phases:
+#   idle        — nothing started
+#   downloading — streaming the zip; `percent` is 0..100 (or -1 if the server
+#                 sent no Content-Length so the size is unknown)
+#   installing  — download done, helper spawned; this process is about to be
+#                 killed by the helper (so this is the last phase we can report)
+#   error       — download/spawn failed; the backend keeps running unchanged
+_lock = threading.Lock()
+_progress = {
+    "phase": "idle",
+    "percent": 0,
+    "received": 0,
+    "total": 0,
+    "latest": None,
+    "error": None,
+}
+
+
+def _set(**kw) -> None:
+    with _lock:
+        _progress.update(kw)
+
+
+def get_progress() -> dict:
+    """Snapshot of the current update progress (for /api/update/progress)."""
+    with _lock:
+        return dict(_progress)
 
 
 def _base_dir() -> str:
@@ -48,16 +84,31 @@ def _base_dir() -> str:
 
 
 def _download(url: str, dest: str) -> None:
-    """Stream the release asset to `dest`. Raises on any network/HTTP error."""
+    """Stream the release asset to `dest`, updating `_progress` as bytes arrive.
+
+    Raises on any network/HTTP error (the caller flips the phase to "error").
+    """
     request = urllib.request.Request(url, headers={"User-Agent": "oasis-updater"})
     with urllib.request.urlopen(request, timeout=30) as response, open(dest, "wb") as out:
+        total = int(response.headers.get("Content-Length") or 0)
+        received = 0
+        # -1 percent signals "size unknown" to the UI (indeterminate progress).
+        _set(received=0, total=total, percent=0 if total else -1)
         while True:
             chunk = response.read(1 << 16)
             if not chunk:
                 break
             out.write(chunk)
+            received += len(chunk)
+            # Cap at 99 until the file is fully written and closed below, so the
+            # UI never shows 100% before the download has actually finished.
+            if total:
+                _set(received=received, percent=min(99, received * 100 // total))
+            else:
+                _set(received=received)
     if os.path.getsize(dest) == 0:
         raise OSError("下載的更新檔為空")
+    _set(received=received, percent=100)
 
 
 def _write_helper(base: str, work: str, zip_path: str, exe: str) -> str:
@@ -80,10 +131,16 @@ LOG="$WORK/update.log"
 exec >>"$LOG" 2>&1
 echo "=== oasis update $(date) ==="
 
-# 1. Wait for the old backend to exit so its files unlock (cap ~120s).
+# 1. Stop the old backend ourselves — it does NOT exit on its own. The short
+#    grace first lets the UI show "installing" and the last response flush.
+#    SIGTERM, then escalate to SIGKILL if it hasn't unlocked its files (cap ~120s).
+sleep {_HANDOFF_GRACE_S}
+kill "$OLDPID" 2>/dev/null || true
 i=0
 while kill -0 "$OLDPID" 2>/dev/null; do
-  sleep 0.5; i=$((i+1)); [ "$i" -ge 240 ] && break
+  sleep 0.5; i=$((i+1))
+  [ "$i" -eq 20 ] && kill -9 "$OLDPID" 2>/dev/null
+  [ "$i" -ge 240 ] && break
 done
 sleep 1
 
@@ -146,7 +203,11 @@ $Log     = Join-Path $Work 'update.log'
 function Log($m) {{ Add-Content -LiteralPath $Log -Value ("{{0}} {{1}}" -f (Get-Date -Format o), $m) }}
 Log '=== oasis update ==='
 
-# 1. Wait for the old backend to exit so its files unlock (cap ~120s).
+# 1. Stop the old backend ourselves — it does NOT exit on its own. The short
+#    grace first lets the UI show "installing" and the last response flush, then
+#    force-stop it and wait for its files to unlock (cap ~120s).
+Start-Sleep -Seconds {_HANDOFF_GRACE_S}
+Stop-Process -Id $OldPid -Force -ErrorAction SilentlyContinue
 $deadline = (Get-Date).AddSeconds(120)
 while ((Get-Process -Id $OldPid -ErrorAction SilentlyContinue) -and ((Get-Date) -lt $deadline)) {{
   Start-Sleep -Milliseconds 500
@@ -214,12 +275,12 @@ def _spawn_detached(script: str) -> None:
         CREATE_BREAKAWAY_FROM_JOB = 0x01000000
         cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
         base_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        kwargs = dict(
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-        )
+        # Capture the helper's own stdout/stderr to a file (not DEVNULL): if
+        # powershell is blocked or killed the instant it launches (e.g. antivirus
+        # objecting to a spawned `-ExecutionPolicy Bypass -File` helper), it never
+        # reaches its own update.log, so this is the only trace of what happened.
+        out = open(os.path.join(os.path.dirname(script), "helper-output.log"), "ab")
+        kwargs = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=out, close_fds=True)
         try:
             subprocess.Popen(cmd, creationflags=base_flags | CREATE_BREAKAWAY_FROM_JOB, **kwargs)
         except OSError:
@@ -235,19 +296,50 @@ def _spawn_detached(script: str) -> None:
         )
 
 
-def apply_update(timeout: float = 6.0) -> dict:
-    """Download the latest release and hand off to the helper that swaps it in.
+def _run_update(download_url: str, base: str, latest) -> None:
+    """Background worker: download the zip, then spawn the swap+relaunch helper.
 
-    On success the response is `{"status": "updating", "latest": <tag>}` and this
-    process exits shortly after, so the frontend should poll /api/health and
-    reconnect once the relaunched backend answers. Failures return
-    `{"status": "error", "error": <msg>}` and leave the running backend intact.
+    Runs off the request thread so the backend stays up and serving progress
+    while the download streams. On the final step it flips the phase to
+    "installing" and spawns the helper, which kills this process and swaps the
+    files in. Any failure flips the phase to "error"; the backend keeps running.
+    """
+    work = os.path.join(base, _WORK_DIRNAME)
+    zip_path = os.path.join(work, "download.zip")
+    try:
+        os.makedirs(work, exist_ok=True)
+        _download(download_url, zip_path)
+        # Download done. Announce "installing" *before* spawning the helper so a
+        # poll landing in the handoff grace sees it; the helper then kills us.
+        _set(phase="installing", percent=100)
+        script = _write_helper(base, work, zip_path, sys.executable)
+        _spawn_detached(script)
+    except Exception as exc:  # download failed, disk full, spawn blocked, ...
+        _set(phase="error", error=f"更新失敗：{exc}")
+
+
+def apply_update(timeout: float = 6.0) -> dict:
+    """Kick off an in-app update and return immediately; the backend stays up.
+
+    Validates the request (frozen build, an update is actually available), then
+    starts the download in a background thread and returns
+    `{"status": "updating", "latest": <tag>}`. The frontend should poll
+    /api/update/progress for the download percent and the "installing" phase,
+    then poll /api/health for the relaunched backend. The download and the file
+    swap run in the background; a helper — not this process — kills the backend
+    once the download is done. Failures to *start* return
+    `{"status": "error", "error": <msg>}` and leave the running backend intact;
+    failures *during* the download surface via the progress "error" phase.
     """
     if not getattr(sys, "frozen", False):
         return {
             "status": "error",
             "error": "自動更新僅適用於打包版。原始碼版本請用 git pull（啟動腳本會自動更新）。",
         }
+
+    with _lock:
+        if _progress["phase"] in ("downloading", "installing"):
+            return {"status": "updating", "latest": _progress["latest"]}
 
     info = version.check_for_update(timeout)
     if info.get("error"):
@@ -259,18 +351,11 @@ def apply_update(timeout: float = 6.0) -> dict:
     if not download_url:
         return {"status": "error", "error": "找不到適用於此系統的更新下載檔。"}
 
+    latest = info.get("latest")
     base = _base_dir()
-    work = os.path.join(base, _WORK_DIRNAME)
-    zip_path = os.path.join(work, "download.zip")
-    try:
-        os.makedirs(work, exist_ok=True)
-        _download(download_url, zip_path)
-        script = _write_helper(base, work, zip_path, sys.executable)
-        _spawn_detached(script)
-    except Exception as exc:  # download failed, disk full, spawn blocked, ...
-        return {"status": "error", "error": f"更新失敗：{exc}"}
-
-    # Give the response time to flush before we exit and unlock our files; the
-    # helper is already waiting on this PID and will swap + relaunch.
-    threading.Timer(_SHUTDOWN_DELAY_S, lambda: os._exit(0)).start()
-    return {"status": "updating", "latest": info.get("latest")}
+    # Set "downloading" up front so a poll racing the thread start sees progress.
+    _set(phase="downloading", percent=0, received=0, total=0, latest=latest, error=None)
+    threading.Thread(
+        target=_run_update, args=(download_url, base, latest), daemon=True
+    ).start()
+    return {"status": "updating", "latest": latest}

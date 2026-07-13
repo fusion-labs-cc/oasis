@@ -113,18 +113,46 @@ export async function checkForUpdate(signal?: AbortSignal): Promise<UpdateInfo> 
 }
 
 export interface ApplyUpdateResult {
-  // "updating" → the backend downloaded the new build and will exit + relaunch
-  // itself; poll checkHealth until it's back. "error" → nothing changed.
+  // "updating" → the backend accepted the request and is downloading the new
+  // build in the background; poll fetchUpdateProgress, then checkHealth once it
+  // starts installing. "error" → nothing changed (couldn't even start).
   status: "updating" | "error";
   latest?: string | null;
   error?: string;
 }
 
 // Tell the local backend to download the latest release and swap itself in.
-// Only the frozen build can do this; a source checkout returns an error. On
-// "updating" the backend restarts, so the caller should wait for checkHealth.
+// Only the frozen build can do this; a source checkout returns an error.
+// Returns immediately; the download runs in the background — poll
+// fetchUpdateProgress for the percent and phase, then checkHealth for the
+// relaunched backend.
 export async function applyUpdate(): Promise<ApplyUpdateResult> {
   const res = await backendFetch("/api/update/apply", { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export interface UpdateProgress {
+  // idle → nothing running; downloading → streaming the zip; installing →
+  // download done, the backend is about to be killed + swapped by the helper;
+  // error → the download/spawn failed and the backend is still running.
+  phase: "idle" | "downloading" | "installing" | "error";
+  // 0..100 while downloading, or -1 when the download size is unknown.
+  percent: number;
+  received: number;
+  total: number;
+  latest: string | null;
+  error?: string | null;
+}
+
+// Poll the phase/percent of the in-flight auto-update (see applyUpdate).
+export async function fetchUpdateProgress(
+  signal?: AbortSignal,
+): Promise<UpdateProgress> {
+  const res = await backendFetch("/api/update/progress", {
+    cache: "no-store",
+    signal,
+  });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }

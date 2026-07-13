@@ -165,16 +165,26 @@ def update_check():
 
 @app.post('/api/update/apply')
 def update_apply():
-    """Download the latest release and swap it in, then relaunch the backend.
+    """Start an in-app update: download the latest release in the background,
+    then hand off to a helper that swaps it in and relaunches the backend.
 
-    Sync `def` so FastAPI runs the (blocking) download in a threadpool. On
-    success the backend exits ~1.5s after responding while a detached helper
-    performs the file swap and relaunch, so the frontend should poll
-    /api/health and reconnect. Only meaningful for the frozen build; a source
-    checkout gets an error telling it to use git.
+    Returns immediately with `{"status": "updating"}` while the backend keeps
+    running and serving. The frontend polls /api/update/progress for the
+    download percent and the "installing" phase, then /api/health for the
+    relaunched backend. The backend is stopped by the helper (it does not exit
+    itself). Only meaningful for the frozen build; a source checkout gets an
+    error telling it to use git.
     """
     import updater
     return updater.apply_update()
+
+
+@app.get('/api/update/progress')
+def update_progress():
+    """Current phase/percent of the in-flight auto-update, for the settings page
+    to poll. Cheap in-memory read; the download runs in a background thread."""
+    import updater
+    return updater.get_progress()
 
 
 @app.get('/api/supported-sites')

@@ -5,7 +5,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
-import { applyUpdate, checkForUpdate, checkHealth, UpdateInfo } from "@/lib/api";
+import {
+  applyUpdate,
+  checkForUpdate,
+  checkHealth,
+  fetchUpdateProgress,
+  UpdateInfo,
+  UpdateProgress,
+} from "@/lib/api";
 import {
   defaultSettings,
   formatHotkey,
@@ -117,14 +124,22 @@ function UpdateSection() {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Set once an update is confirmed applied (the relaunched backend reports the
+  // new version), e.g. "已更新到 v0.2.3".
+  const [success, setSuccess] = useState<string | null>(null);
   // null → idle; otherwise the current phase of an in-progress auto-update.
-  const [updating, setUpdating] = useState<
-    "downloading" | "restarting" | null
+  const [phase, setPhase] = useState<
+    "downloading" | "installing" | "restarting" | null
   >(null);
+  // Download progress 0..100 while phase === "downloading", or -1 when the
+  // download size is unknown (shown as an indeterminate state).
+  const [percent, setPercent] = useState(0);
+  const updating = phase !== null;
 
   async function runCheck(signal?: AbortSignal) {
     setChecking(true);
     setError(null);
+    setSuccess(null);
     try {
       setInfo(await checkForUpdate(signal));
     } catch {
@@ -149,31 +164,97 @@ function UpdateSection() {
     return false;
   }
 
+  // Poll the backend's download progress until it starts installing (after
+  // which the helper kills the backend, so the endpoint goes unreachable — we
+  // treat that as "installing" and move on to waiting for the relaunch).
+  // Resolves true to continue to the restart wait, or false when the download
+  // itself failed (an error has already been surfaced).
+  async function pollDownload() {
+    const deadline = Date.now() + 600_000; // 10 min cap for a slow download
+    while (Date.now() < deadline) {
+      let p: UpdateProgress;
+      try {
+        p = await fetchUpdateProgress();
+      } catch {
+        // Backend unreachable — it most likely moved to installing and the
+        // helper already stopped it. Proceed to wait for the relaunch.
+        return true;
+      }
+      if (p.phase === "error") {
+        setError(p.error ?? "下載更新失敗。");
+        return false;
+      }
+      if (p.phase === "installing") {
+        setPercent(100);
+        setPhase("installing");
+        return true;
+      }
+      if (p.phase === "downloading") setPercent(p.percent);
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    setError("下載更新逾時，請稍後再試，或改用下方「手動下載」安裝。");
+    return false;
+  }
+
   async function runUpdate() {
     setError(null);
-    setUpdating("downloading");
+    setSuccess(null);
+    setPercent(0);
+    setPhase("downloading");
+    // The version we're updating to, so we can confirm the relaunched backend is
+    // actually the new build (a failed swap relaunches the OLD build, which is
+    // healthy but unchanged — health alone can't tell success from failure).
+    let target: string | null = info?.latest ?? null;
     try {
       const res = await applyUpdate();
       if (res.status !== "updating") {
         setError(res.error ?? "更新失敗。");
-        setUpdating(null);
+        setPhase(null);
         return;
       }
+      target = res.latest ?? target;
     } catch (e) {
       setError(e instanceof Error ? e.message : "更新失敗。");
-      setUpdating(null);
+      setPhase(null);
       return;
     }
 
-    setUpdating("restarting");
+    // Stream the download percent, then the "installing" phase, before the
+    // backend is stopped and swapped by the helper.
+    if (!(await pollDownload())) {
+      setPhase(null);
+      return;
+    }
+
+    setPhase("restarting");
     const back = await waitForRestart();
-    setUpdating(null);
-    if (back) {
-      await runCheck();
-    } else {
+    if (!back) {
+      setPhase(null);
       setError(
-        "後端重新啟動逾時。更新可能仍在進行，請稍候重新整理頁面；若持續無法連線，請手動重新啟動 OASIS。",
+        "後端重新啟動逾時，更新可能未完成。請手動重新啟動 OASIS；若版本仍未變更，請改用下方「手動下載」安裝。",
       );
+      return;
+    }
+
+    // Backend is answering again — confirm it's the NEW version before calling
+    // this a success. If it came back on the old version, the file swap failed
+    // (e.g. the update helper couldn't replace locked files) and the old build
+    // relaunched, so we surface an explicit failure with the manual fallback.
+    try {
+      const fresh = await checkForUpdate();
+      setInfo(fresh);
+      setPhase(null);
+      if ((target && fresh.current === target) || !fresh.update_available) {
+        setSuccess(`已更新到 ${fresh.current}`);
+      } else {
+        setError(
+          `更新未生效：目前仍是 ${fresh.current}。請改用下方「手動下載」安裝；` +
+            "若在 Windows，可查看安裝資料夾中的 .oasis-update\\update.log 了解原因。",
+        );
+      }
+    } catch {
+      setPhase(null);
+      setError("後端已重新啟動，但無法確認版本。請重新整理頁面並再次「檢查更新」確認。");
     }
   }
 
@@ -214,17 +295,43 @@ function UpdateSection() {
               {error}
             </p>
           )}
+          {success && (
+            <p className="max-w-[16rem] text-right text-xs text-emerald-500">
+              {success}
+            </p>
+          )}
           {info?.error && (
             <p className="max-w-[16rem] text-right text-xs text-amber-500">
               {info.error}
             </p>
           )}
-          {updating ? (
-            <p className="text-xs text-text-tertiary">
-              {updating === "downloading"
-                ? "下載更新中…"
-                : "安裝完成，正在重新啟動後端…"}
-            </p>
+          {phase ? (
+            <div className="flex w-[16rem] flex-col items-end gap-1.5">
+              <p className="text-xs text-text-tertiary">
+                {phase === "downloading"
+                  ? percent >= 0
+                    ? `下載更新中… ${percent}%`
+                    : "下載更新中…"
+                  : phase === "installing"
+                    ? "安裝中…"
+                    : "安裝完成，正在重新啟動後端…"}
+              </p>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-highest">
+                <div
+                  className={`h-full rounded-full bg-accent transition-all duration-300 ${
+                    // Indeterminate cases (unknown size / installing / restart)
+                    // pulse a filled bar; a known percent fills proportionally.
+                    phase === "downloading" && percent >= 0 ? "" : "animate-pulse"
+                  }`}
+                  style={{
+                    width:
+                      phase === "downloading" && percent >= 0
+                        ? `${percent}%`
+                        : "100%",
+                  }}
+                />
+              </div>
+            </div>
           ) : (
             info &&
             !info.error && (
@@ -248,7 +355,7 @@ function UpdateSection() {
               <button
                 type="button"
                 onClick={() => runUpdate()}
-                disabled={updating !== null || checking}
+                disabled={updating || checking}
                 className="rounded-lg bg-accent px-4 py-2 text-xs font-bold text-neutral-950 transition hover:bg-accent-hover shadow-[0_2px_10px_rgba(16,185,129,0.2)] disabled:opacity-50 cursor-pointer"
               >
                 {updating ? "更新中…" : "立即更新"}
@@ -257,7 +364,7 @@ function UpdateSection() {
             <button
               type="button"
               onClick={() => runCheck()}
-              disabled={checking || updating !== null}
+              disabled={checking || updating}
               className="rounded-lg border border-border-hairline bg-surface-highest px-4 py-2 text-xs font-bold text-text-secondary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
             >
               {checking ? "檢查中…" : "檢查更新"}
