@@ -20,6 +20,8 @@ const SUGGESTIONS = [
   "Google 桌面端 UI 改版設計",
 ];
 
+const STORAGE_KEY = "awake:active";
+
 export default function AwakeMode() {
   const [active, setActive] = useState(false);
   const [query, setQuery] = useState("");
@@ -30,6 +32,20 @@ export default function AwakeMode() {
   const inputRef = useRef<HTMLInputElement>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+
+  // Restore the disguise after a refresh, tab close/reopen, or navigating away
+  // and back. We read localStorage in an effect (not during render) so the
+  // server-rendered markup and the first client render agree, avoiding a
+  // hydration mismatch.
+  useEffect(() => {
+    if (localStorage.getItem(STORAGE_KEY) === "1") setActive(true);
+  }, []);
+
+  // Persist every change so the state survives a full reload.
+  useEffect(() => {
+    if (active) localStorage.setItem(STORAGE_KEY, "1");
+    else localStorage.removeItem(STORAGE_KEY);
+  }, [active]);
 
   // Toggle on the platform-specific shortcut.
   useEffect(() => {
