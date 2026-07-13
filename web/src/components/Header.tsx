@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BackendStatus from "./BackendStatus";
 import AddVideoModal from "./AddVideoModal";
+import ImportExportModal from "./ImportExportModal";
 import { useVideos } from "@/context/VideoContext";
 import { useToast } from "@/components/Toast";
 
@@ -14,6 +15,8 @@ export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
   const [keyDisplay, setKeyDisplay] = useState("⌘ K");
   const [awakeKey, setAwakeKey] = useState("⌘ X");
+  // The import/export dialog and which tab it opens on.
+  const [ioTab, setIoTab] = useState<"export" | "import" | null>(null);
 
   const router = useRouter();
   const { videos } = useVideos();
@@ -140,6 +143,30 @@ export default function Header() {
               </kbd>
             </button>
 
+            {/* Import / Export Action Button — opens a dialog for copy/download
+                (export) or paste/upload (import). */}
+            <button
+              type="button"
+              onClick={() => setIoTab("export")}
+              title="匯入 / 匯出：以 JSON 備份或還原整個影片目錄（僅中繼資料）"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-hairline bg-surface-elevated text-text-secondary transition duration-200 hover:scale-[1.02] hover:bg-surface-highest hover:text-text-primary active:scale-98 cursor-pointer"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+                <polyline points="7 9 12 4 17 9" />
+                <line x1="12" y1="4" x2="12" y2="16" />
+              </svg>
+              <span className="text-xs font-semibold">匯入 / 匯出</span>
+            </button>
+
             {/* Add Media Action Button */}
             <button
               type="button"
@@ -168,6 +195,11 @@ export default function Header() {
       </header>
 
       <AddVideoModal isOpen={isOpen} onClose={() => setIsOpen(false)} />
+      <ImportExportModal
+        isOpen={ioTab !== null}
+        tab={ioTab ?? "export"}
+        onClose={() => setIoTab(null)}
+      />
     </>
   );
 }

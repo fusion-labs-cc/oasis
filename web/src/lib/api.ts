@@ -161,6 +161,42 @@ export async function createVideo(payload: CreateVideoPayload): Promise<VideoRec
   return res.json();
 }
 
+// Portable video metadata carried in an import/export file. Mirrors the
+// backend's EXPORT_FIELDS: no local path, play count, pending flag or timestamps.
+export interface ExportedVideo {
+  code: string;
+  url: string;
+  title: string;
+  title_zh_tw?: string | null;
+  actress?: string | null;
+  tags: string[];
+  cover?: string | null;
+}
+
+// Fetch the whole catalog as portable JSON (metadata only), e.g. to save a backup.
+export async function exportVideos(): Promise<ExportedVideo[]> {
+  const res = await backendFetch("/api/export", { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return (data.videos ?? []) as ExportedVideo[];
+}
+
+export interface ImportSummary {
+  imported: number;
+  skipped: number;
+}
+
+// Import videos from a previously exported list; existing codes are updated.
+export async function importVideos(videos: ExportedVideo[]): Promise<ImportSummary> {
+  const res = await backendFetch("/api/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ videos }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
 export async function cancelAnalyze(taskId: string): Promise<{ status: string, message: string }> {
   const res = await backendFetch(`/api/analyze/cancel/${taskId}`, { method: "POST" });
   if (!res.ok) throw new Error(await parseError(res));

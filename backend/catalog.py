@@ -626,6 +626,74 @@ def create_manual_video(url, title, code=None, actress=None, tags=None, cover=No
     return record
 
 
+# -- Import / Export ------------------------------------------------------------
+
+# Portable metadata fields carried in an export. Deliberately excludes the local
+# video_path, play_count, download_pending and created_at — those are specific to
+# one machine/session and are re-derived (or reset) on the importing side.
+EXPORT_FIELDS = ('code', 'url', 'title', 'title_zh_tw', 'actress', 'tags', 'cover')
+
+
+def export_videos() -> list[dict]:
+    """Return the whole catalog as plain dicts holding only the portable
+    metadata fields (see EXPORT_FIELDS), ready to be serialised to JSON."""
+    return [{k: r.get(k) for k in EXPORT_FIELDS} for r in list_all_videos()]
+
+
+def import_videos(records: list) -> dict:
+    """Insert/update videos from previously exported JSON.
+
+    Only the portable metadata fields are honoured; video_path/play_count/
+    download_pending/created_at are ignored (video_path on an existing row is
+    preserved by insert_video's COALESCE upsert). An entry with the same code as
+    an existing one updates it; a new code inserts a fresh row.
+
+    Records missing a code/url/title are skipped. Returns a summary dict with the
+    number of records imported and skipped.
+    """
+    if not isinstance(records, list):
+        raise ValueError('匯入資料必須是影片陣列')
+
+    imported = 0
+    skipped = 0
+    for rec in records:
+        if not isinstance(rec, dict):
+            skipped += 1
+            continue
+        code = (rec.get('code') or '').strip().upper()
+        url = (rec.get('url') or '').strip()
+        title = (rec.get('title') or '').strip()
+        if not code or not url or not title:
+            skipped += 1
+            continue
+
+        # Accept tags as a list or a comma-separated string; strip + de-duplicate.
+        raw_tags = rec.get('tags') or []
+        if isinstance(raw_tags, str):
+            raw_tags = raw_tags.split(',')
+        tags = []
+        seen = set()
+        for t in raw_tags:
+            t = (t or '').strip()
+            if t and t not in seen:
+                seen.add(t)
+                tags.append(t)
+
+        insert_video({
+            'code': code,
+            'url': url,
+            'title': title,
+            'title_zh_tw': (rec.get('title_zh_tw') or '').strip() or title,
+            'actress': (rec.get('actress') or '').strip() or None,
+            'tags': tags,
+            'cover': (rec.get('cover') or '').strip() or None,
+            'video_path': None,  # preserved on existing rows via COALESCE upsert
+        })
+        imported += 1
+
+    return {'imported': imported, 'skipped': skipped}
+
+
 def print_video_table(rows):
     """Pretty-print a list of video records."""
     if not rows:

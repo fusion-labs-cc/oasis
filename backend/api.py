@@ -685,6 +685,30 @@ def create_video(body: CreateVideoRequest):
     return _enrich_record(record, with_size=True)
 
 
+@app.get('/api/export')
+def export_catalog():
+    """Export the whole catalog as portable JSON (metadata only — no local file
+    path, play count, pending flag or timestamps)."""
+    return {'videos': catalog.export_videos()}
+
+
+class ImportRequest(BaseModel):
+    videos: list[dict]
+
+
+@app.post('/api/import')
+def import_catalog(body: ImportRequest):
+    """Import videos from previously exported JSON. Metadata only; an entry whose
+    code already exists is updated (its local file is kept), a new code is added."""
+    try:
+        summary = catalog.import_videos(body.videos)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f'匯入失敗: {e}')
+    return summary
+
+
 @app.get('/api/facets')
 def facets():
     """Distinct actresses and tags (with counts) for building filter controls."""
