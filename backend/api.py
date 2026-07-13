@@ -103,7 +103,8 @@ def _resume_pending_downloads():
         return
     print(f"🔄 Resuming {len(pending)} pending download(s) after restart")
     for video_id, url in pending:
-        _clear_progress(video_id)  # drop any stale percent from the previous run
+        # Keep any persisted percent so the UI shows the resumed progress instead
+        # of resetting to 0/null; the worker seeds from it and only moves forward.
         _start_download(video_id, url)
 
 
@@ -190,6 +191,22 @@ def _progress_path(video_id: int) -> str:
     return os.path.join(_PROGRESS_DIR, f'{video_id}.txt')
 
 
+def _cancel_marker_path(video_id: int) -> str:
+    """Marker file the API drops before terminating a download to signal a real
+    user cancel (vs. a plain server shutdown). The worker's shutdown handler
+    only wipes partial segments when this marker is present, so a Ctrl+C /
+    restart keeps them for resume."""
+    return os.path.join(_PROGRESS_DIR, f'{video_id}.cancel')
+
+
+def _mark_cancel(video_id: int) -> None:
+    try:
+        os.makedirs(_PROGRESS_DIR, exist_ok=True)
+        open(_cancel_marker_path(video_id), 'w').close()
+    except OSError:
+        pass
+
+
 def _read_progress(video_id: int) -> int | None:
     """Current download percent for a video, or None if not yet reported."""
     try:
@@ -200,10 +217,11 @@ def _read_progress(video_id: int) -> int | None:
 
 
 def _clear_progress(video_id: int) -> None:
-    try:
-        os.remove(_progress_path(video_id))
-    except OSError:
-        pass
+    for path in (_progress_path(video_id), _cancel_marker_path(video_id)):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def _analyze_worker(url: str, result_queue: multiprocessing.Queue):
@@ -268,14 +286,23 @@ def _download_worker(video_id: int, url: str):
                 dr.quit()
             except:
                 pass
-        # Clean up temporary folder containing downloaded ts segments
+        # Only wipe partial segments when the user explicitly cancelled (marker
+        # present). On a plain server shutdown (Ctrl+C / restart) keep them so
+        # the download resumes from disk on the next start instead of restarting
+        # the file from scratch.
+        cancelled = os.path.exists(_cancel_marker_path(video_id))
         folder = getattr(dl, '_active_folder_path', None)
-        if folder and os.path.exists(folder):
+        if cancelled and folder and os.path.exists(folder):
             try:
                 shutil.rmtree(folder)
                 print(f"🧹 [PID {os.getpid()}] Cleaned up temp download folder {folder}")
             except Exception as e:
                 print(f"⚠️ Failed to remove temp folder {folder}: {e}")
+        if cancelled:
+            try:
+                os.remove(_cancel_marker_path(video_id))
+            except OSError:
+                pass
         # os._exit terminates immediately without waiting for the non-daemon
         # ThreadPoolExecutor worker threads to drain (which would otherwise
         # flood the log with "No such file" errors and delay shutdown).
@@ -297,16 +324,24 @@ def _download_worker(video_id: int, url: str):
         print(f"[PID {_os.getpid()}] Starting download for {url}")
 
         # Report progress by writing a tiny per-video file the API process polls.
-        # Only rewrite on an actual percent change (the crawler fires the callback
-        # once per segment) and guard with a lock since segments run in threads.
+        # Seed from any existing file so a resumed download (segments already on
+        # disk from before a restart) picks up where it left off, and only ever
+        # move the percent *forward* — this keeps the setup phase (which reports
+        # a low 1–3%) from momentarily dipping the bar below the resumed value,
+        # so cards / detail / progress list all show one consistent number.
         progress_path = _progress_path(video_id)
         _os.makedirs(_os.path.dirname(progress_path), exist_ok=True)
         _prog_lock = _threading.Lock()
-        _last_pct = {"v": -1}
+        try:
+            with open(progress_path) as _pf:
+                _seed = int(_pf.read().strip())
+        except (OSError, ValueError):
+            _seed = -1
+        _last_pct = {"v": _seed}
 
         def _write_progress(pct: int):
             with _prog_lock:
-                if pct == _last_pct["v"]:
+                if pct <= _last_pct["v"]:
                     return
                 _last_pct["v"] = pct
             try:
@@ -499,6 +534,9 @@ def cancel_download(video_id: int):
         raise HTTPException(status_code=404, detail="沒有正在下載的影片任務")
 
     if proc.is_alive():
+        # Drop the cancel marker first so the worker's shutdown handler knows to
+        # wipe the partial segments (a real cancel), not keep them for resume.
+        _mark_cancel(video_id)
         proc.terminate()
         proc.join()
         print(f"🛑 [PID {proc.pid}] Download task for video {video_id} terminated by client")

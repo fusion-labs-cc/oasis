@@ -34,6 +34,11 @@ const BackendContext = createContext<BackendContextType | undefined>(undefined);
 // How often to re-check the backend *while connected*, to notice a drop.
 const POLL_INTERVAL_MS = 10000;
 
+// How often to retry *after a dropped connection* (e.g. the backend was
+// Ctrl+C'd and restarted). Faster than the connected poll so the UI restores
+// itself promptly once the server is back.
+const RETRY_INTERVAL_MS = 3000;
+
 export function BackendProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<BackendStatusType>("checking");
   // Defaults to "manual" so a fresh, never-connected load reads as 連線中斷
@@ -41,6 +46,7 @@ export function BackendProvider({ children }: { children: React.ReactNode }) {
   const [downReason, setDownReason] = useState<BackendDownReason>("manual");
   const [backendUrlState, setBackendUrlState] = useState<string>("");
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const ping = useCallback(async () => {
     const ok = await checkHealth();
@@ -107,6 +113,24 @@ export function BackendProvider({ children }: { children: React.ReactNode }) {
       }
     };
   }, [status, ping]);
+
+  // Auto-reconnect after a *dropped* connection (downReason "failed"), e.g. the
+  // backend was Ctrl+C'd and restarted. Keep pinging the same backend in the
+  // background; a successful ping flips status back to "up" (and re-authorizes),
+  // so the UI — including in-progress downloads resumed on the server — restores
+  // itself without the user re-entering. A deliberate disconnect ("manual") does
+  // NOT retry, so the entrance gate still gates intentional teardowns.
+  useEffect(() => {
+    if (status === "down" && downReason === "failed") {
+      retryTimer.current = setInterval(ping, RETRY_INTERVAL_MS);
+      return () => {
+        if (retryTimer.current) {
+          clearInterval(retryTimer.current);
+          retryTimer.current = null;
+        }
+      };
+    }
+  }, [status, downReason, ping]);
 
   return (
     <BackendContext.Provider

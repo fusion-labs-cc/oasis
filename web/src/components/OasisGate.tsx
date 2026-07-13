@@ -242,7 +242,7 @@ export default function OasisGate() {
                   className="h-2 w-2 rounded-full bg-[#ff5c7a] shadow-[0_0_10px_rgba(255,92,122,0.8)]"
                   style={{ animation: "oasis-pulse 1.1s ease-in-out infinite" }}
                 />
-                {downReason === "failed" ? "連線失敗" : "連線中斷"}
+                {downReason === "failed" ? "連線中斷 · 自動重新連線中…" : "連線中斷"}
               </div>
               <label className="mb-2 block text-left text-[10px] font-semibold uppercase tracking-[0.3em] text-white/35">
                 入口座標

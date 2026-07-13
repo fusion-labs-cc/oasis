@@ -134,13 +134,18 @@ export function VideoProvider({ children }: { children: React.ReactNode }) {
             await syncVideo(id);
           } else {
             // Still "downloading" / "queued": push the live percent + queue state
-            // onto the record so cards and the detail page update in place.
-            updateVideo(id, {
+            // onto the record so cards and the detail page update in place. Keep
+            // the last-known percent when the backend hasn't reported one yet
+            // (null) so this matches the progress list exactly instead of
+            // blanking the number — the two must not diverge.
+            const patch: Partial<VideoRecord> = {
               is_downloading: true,
               download_queued: res.status === "queued",
-              download_progress:
-                typeof res.progress === "number" ? res.progress : null,
-            });
+            };
+            if (typeof res.progress === "number") {
+              patch.download_progress = res.progress;
+            }
+            updateVideo(id, patch);
           }
         } catch {
           // Transient error; try again on the next tick.
