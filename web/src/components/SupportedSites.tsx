@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { fetchSupportedSites, SupportedSite } from "@/lib/api";
+import { useBackend } from "@/context/BackendContext";
 
 // Module-level cache so the several places that render this list (main-page
 // hero, add-video modal) share a single backend request and later mounts paint
@@ -37,9 +38,15 @@ export default function SupportedSites({
   label?: string;
   className?: string;
 }) {
+  const { status } = useBackend();
   const [sites, setSites] = useState<SupportedSite[]>(cache ?? []);
 
+  // Only reach the backend once it's actually connected. This component renders
+  // in the home hero, which mounts *beneath* the OasisGate overlay — without this
+  // guard it would hit /api/supported-sites while the user is still at the gate,
+  // before they've connected. Gate the fetch on "up" like VideoContext does.
   useEffect(() => {
+    if (status !== "up") return;
     let alive = true;
     loadOnce()
       .then((s) => {
@@ -49,7 +56,7 @@ export default function SupportedSites({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [status]);
 
   if (sites.length === 0) return null;
 
