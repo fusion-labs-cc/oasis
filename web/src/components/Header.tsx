@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable react-hooks/set-state-in-effect */
-
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -10,13 +8,17 @@ import AddVideoModal from "./AddVideoModal";
 import ImportExportModal from "./ImportExportModal";
 import { useVideos } from "@/context/VideoContext";
 import { useToast } from "@/components/Toast";
+import { formatHotkey, matchesHotkey, useIsMac, useSettings } from "@/lib/settings";
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false);
-  const [keyDisplay, setKeyDisplay] = useState("⌘ K");
-  const [awakeKey, setAwakeKey] = useState("⌘ X");
   // The import/export dialog and which tab it opens on.
   const [ioTab, setIoTab] = useState<"export" | "import" | null>(null);
+
+  const settings = useSettings();
+  const isMac = useIsMac();
+  const keyDisplay = formatHotkey(settings.addVideoHotkey, isMac);
+  const awakeKey = formatHotkey(settings.awakeHotkey, isMac);
 
   const router = useRouter();
   const { videos } = useVideos();
@@ -34,42 +36,28 @@ export default function Header() {
     router.push(`/video/${pick.id}`);
   }
 
-  // OS detection for keyboard shortcut display
+  // Shortcut listener: `/` or the user-configured "add video" shortcut.
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const isMac = /Mac|iPad|iPhone|iPod/.test(navigator.userAgent);
-      setKeyDisplay(isMac ? "⌘ K" : "Ctrl+K");
-      setAwakeKey(isMac ? "⌘ X" : "Alt+X");
-    }
-  }, []);
+    const addHotkey = settings.addVideoHotkey;
 
-  // Shortcut listener: `/` or `⌘+K` or `Ctrl+K`
-  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
-      
+
       if (
         activeEl &&
         (activeEl.tagName === "INPUT" ||
           activeEl.tagName === "TEXTAREA" ||
           (activeEl as HTMLElement).isContentEditable)
       ) {
-        // If focused inside our command palette input, allow Cmd+K/Ctrl+K to close it
-        if (
-          activeEl.id === "add-video-url" &&
-          (e.metaKey || e.ctrlKey) &&
-          e.key.toLowerCase() === "k"
-        ) {
+        // If focused inside our command palette input, allow the shortcut to close it.
+        if (activeEl.id === "add-video-url" && matchesHotkey(e, addHotkey)) {
           e.preventDefault();
           setIsOpen(false);
         }
         return;
       }
 
-      if (
-        e.key === "/" ||
-        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")
-      ) {
+      if (e.key === "/" || matchesHotkey(e, addHotkey)) {
         e.preventDefault();
         setIsOpen((prev) => !prev);
       }
@@ -77,7 +65,7 @@ export default function Header() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [settings.addVideoHotkey]);
 
   return (
     <>
@@ -118,30 +106,32 @@ export default function Header() {
               <span className="text-xs font-semibold">隨機播放</span>
             </button>
 
-            {/* Awake Mode (boss key) Action Button */}
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event("awake:toggle"))}
-              title="Awake 模式：一鍵偽裝成 Google 並暫停播放"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-hairline bg-surface-elevated text-text-secondary transition duration-200 hover:scale-[1.02] hover:bg-surface-highest hover:text-text-primary active:scale-98 cursor-pointer"
-            >
-              <svg
-                className="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {/* Awake Mode (boss key) Action Button — hidden when disabled in settings */}
+            {settings.awakeEnabled && (
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new Event("awake:toggle"))}
+                title="Awake 模式：一鍵偽裝成 Google 並暫停播放"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border-hairline bg-surface-elevated text-text-secondary transition duration-200 hover:scale-[1.02] hover:bg-surface-highest hover:text-text-primary active:scale-98 cursor-pointer"
               >
-                <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
-              <span className="text-xs font-semibold">Awake</span>
-              <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-mono font-bold bg-surface-highest text-text-tertiary border border-border-hairline rounded shadow-sm">
-                {awakeKey}
-              </kbd>
-            </button>
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <span className="text-xs font-semibold">Awake</span>
+                <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-mono font-bold bg-surface-highest text-text-tertiary border border-border-hairline rounded shadow-sm">
+                  {awakeKey}
+                </kbd>
+              </button>
+            )}
 
             {/* Import / Export Action Button — opens a dialog for copy/download
                 (export) or paste/upload (import). */}
@@ -190,6 +180,27 @@ export default function Header() {
                 {keyDisplay}
               </kbd>
             </button>
+
+            {/* Settings — nickname, Awake Mode, and keyboard shortcuts */}
+            <Link
+              href="/settings"
+              title="設定：暱稱、Awake 模式與鍵盤快速鍵"
+              aria-label="設定"
+              className="flex items-center justify-center h-9 w-9 rounded-lg border border-border-hairline bg-surface-elevated text-text-secondary transition duration-200 hover:scale-[1.02] hover:bg-surface-highest hover:text-text-primary active:scale-98 cursor-pointer"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+              </svg>
+            </Link>
           </div>
         </div>
       </header>

@@ -1,6 +1,9 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 import { useEffect, useRef, useState } from "react";
+import { matchesHotkey, useSettings } from "@/lib/settings";
 
 /**
  * Awake Mode — a "boss key" disguise.
@@ -23,6 +26,7 @@ const SUGGESTIONS = [
 const STORAGE_KEY = "awake:active";
 
 export default function AwakeMode() {
+  const settings = useSettings();
   const [active, setActive] = useState(false);
   const [query, setQuery] = useState("");
   const [aiMode, setAiMode] = useState(false);
@@ -47,18 +51,12 @@ export default function AwakeMode() {
     else localStorage.removeItem(STORAGE_KEY);
   }, [active]);
 
-  // Toggle on the platform-specific shortcut.
+  // Toggle on the user-configured shortcut (unless Awake Mode is disabled).
   useEffect(() => {
-    const isMac =
-      typeof navigator !== "undefined" &&
-      /Mac|iPad|iPhone|iPod/.test(navigator.userAgent);
+    if (!settings.awakeEnabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const combo = isMac
-        ? e.metaKey && !e.ctrlKey && !e.altKey
-        : e.altKey && !e.metaKey && !e.ctrlKey;
-
-      if (combo && e.key.toLowerCase() === "x") {
+      if (matchesHotkey(e, settings.awakeHotkey)) {
         e.preventDefault();
         setActive((prev) => !prev);
       }
@@ -66,7 +64,12 @@ export default function AwakeMode() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [settings.awakeEnabled, settings.awakeHotkey]);
+
+  // If Awake Mode gets disabled while the disguise is up, drop it.
+  useEffect(() => {
+    if (!settings.awakeEnabled) setActive(false);
+  }, [settings.awakeEnabled]);
 
   // Allow other UI (e.g. the header button) to toggle Awake Mode.
   useEffect(() => {
