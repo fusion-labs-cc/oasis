@@ -29,6 +29,38 @@ export function setBackendUrl(url: string): void {
   else window.localStorage.removeItem(STORAGE_KEY);
 }
 
+// Is this URL pointing back at the machine the browser is running on? Used to
+// keep such a URL out of a pairing QR, where it is worse than useless: a phone
+// that scanned it would dial *itself*, not the backend.
+export function isLoopbackUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "0.0.0.0" || host === "::1" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
+// The backend's **public** URL — the tunnel the owner set up so their other
+// devices can reach it. Deliberately not the same thing as getBackendUrl(): on
+// the owner's own machine that one is localhost, which is exactly the URL a
+// pairing QR must not carry. Only the QR needs this, so it stays in localStorage
+// with the rest of the portal's per-device state; the backend never learns it
+// (it cannot — it has no idea what tunnel, if any, is pointed at it).
+const PUBLIC_URL_KEY = "oasis:publicBackendUrl";
+
+export function getPublicBackendUrl(): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(PUBLIC_URL_KEY) ?? "";
+}
+
+export function setPublicBackendUrl(url: string): void {
+  if (typeof window === "undefined") return;
+  const clean = normalize(url);
+  if (clean) window.localStorage.setItem(PUBLIC_URL_KEY, clean);
+  else window.localStorage.removeItem(PUBLIC_URL_KEY);
+}
+
 // The access code, attached to every /api/* call (see backendFetch). The backend
 // generates it and prints it to its own console; a remote device is told it once
 // by the user and stores it here. It *is* the credential — there is no session to

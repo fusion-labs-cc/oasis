@@ -20,7 +20,7 @@ import {
   UpdateLogs,
   UpdateProgress,
 } from "@/lib/api";
-import { getBackendUrl } from "@/lib/backend";
+import { getPublicBackendUrl, isLoopbackUrl, setPublicBackendUrl } from "@/lib/backend";
 import {
   defaultSettings,
   formatHotkey,
@@ -118,6 +118,9 @@ function Field({
   );
 }
 
+const inputClass =
+  "w-64 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50";
+
 /**
  * Remote access — one switch, and the code it mints.
  *
@@ -137,13 +140,29 @@ function Field({
  */
 function RemoteAccessSection() {
   const toast = useToast();
-  const { codeSet, local, ping } = useBackend();
+  const { codeSet, local, ping, backendUrl } = useBackend();
 
   const [busy, setBusy] = useState(false);
-  // Pairing QR. It carries the backend URL and nothing else — a phone that scans
-  // it still has to be told the code — so it is only ever a shortcut around
-  // typing a long tunnel URL by hand.
+  // Pairing QR. It carries a backend URL and nothing else — a phone that scans it
+  // still has to be told the code — so it is only ever a shortcut around typing a
+  // long tunnel URL by hand.
   const [qr, setQr] = useState<string | null>(null);
+  // ...and the URL it carries has to be the *public* one, which only the user
+  // knows: the backend is reached over a tunnel they set up themselves, and it has
+  // no idea what (if anything) is pointed at it. The portal's own backend URL is
+  // no substitute — on the owner's machine it is localhost, and a phone that
+  // scanned that would dial itself.
+  const [publicUrl, setPublicUrl] = useState("");
+  const seeded = useRef(false);
+
+  // Seed it once: whatever was saved before, or — if the portal is already talking
+  // to the backend through the tunnel — the URL it is using right now.
+  useEffect(() => {
+    if (seeded.current || !backendUrl) return;
+    seeded.current = true;
+    const saved = getPublicBackendUrl();
+    setPublicUrl(saved || (isLoopbackUrl(backendUrl) ? "" : backendUrl));
+  }, [backendUrl]);
 
   async function toggle() {
     if (busy) return;
@@ -189,11 +208,40 @@ function RemoteAccessSection() {
   }
 
   async function showQr() {
+    const url = publicUrl.trim().replace(/\/+$/, "");
+    if (!url || busy) return;
+
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+    } catch {
+      toast("請輸入完整的公開網址，例如 https://xxxx.ngrok-free.app", { type: "error" });
+      return;
+    }
+    if (isLoopbackUrl(url)) {
+      toast("這是本機位址：手機掃描後會連到手機自己。請填入對外的通道網址。", {
+        type: "error",
+      });
+      return;
+    }
+    // An HTTPS page may call http://localhost (browsers exempt it), but not a
+    // plain-HTTP tunnel — that is blocked as mixed content, and the phone would
+    // just fail to connect with no useful error.
+    if (parsed.protocol === "http:" && window.location.protocol === "https:") {
+      toast("公開網址是 http，手機上會被瀏覽器以混合內容為由擋掉。請改用 https 的通道。", {
+        type: "error",
+      });
+      return;
+    }
+
     setBusy(true);
     try {
+      setPublicBackendUrl(url);
+      setPublicUrl(url);
       // Just the coordinates — no credential. The fragment never reaches a
       // server, and the gate wipes it from the address bar as soon as it reads it.
-      const payload = btoa(JSON.stringify({ u: getBackendUrl() }))
+      const payload = btoa(JSON.stringify({ u: url }))
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
@@ -262,16 +310,30 @@ function RemoteAccessSection() {
 
           <Field
             title="配對其他裝置"
-            description="用手機掃描這個 QR code，就不必手動輸入一長串入口座標。QR code 只包含入口座標，不含存取碼——掃描後手機仍需輸入主控台上顯示的存取碼。"
+            description="填入你的後端對外網址（例如 ngrok 之類的通道給你的網址），產生 QR code 讓手機掃描，就不必手動輸入一長串座標。綠洲不知道你架了什麼通道，所以這個網址只能由你提供。QR code 只包含入口座標，不含存取碼——掃描後手機仍需輸入主控台上顯示的存取碼。"
           >
-            <button
-              type="button"
-              onClick={showQr}
-              disabled={busy}
-              className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
-            >
-              {qr ? "重新產生" : "顯示 QR code"}
-            </button>
+            <div className="flex flex-col items-end gap-2">
+              <input
+                type="url"
+                value={publicUrl}
+                onChange={(e) => setPublicUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") showQr();
+                }}
+                placeholder="https://xxxx.ngrok-free.app"
+                autoComplete="off"
+                spellCheck={false}
+                className={inputClass}
+              />
+              <button
+                type="button"
+                onClick={showQr}
+                disabled={busy || !publicUrl.trim()}
+                className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
+              >
+                {qr ? "重新產生" : "顯示 QR code"}
+              </button>
+            </div>
           </Field>
           {qr && (
             <div className="flex flex-col items-center gap-2 border-b border-border-hairline py-6">
