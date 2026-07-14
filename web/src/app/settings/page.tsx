@@ -121,16 +121,19 @@ function Field({
 /**
  * Remote access — one switch, and the code it mints.
  *
- * Off (the default), the backend is local-only: this machine needs no credential
- * and every non-local caller is refused outright, so tunnelling a backend whose
- * switch is off leaks nothing. On, the backend generates a code and prints it to
- * *its own console window* — this page never shows it, which is why a settings
- * page left open on a shared screen gives nothing away, and why "forgot it" is
- * answered by printing it again rather than displaying it here.
+ * Off (the default), the backend is local-only: its own machine needs no
+ * credential and every non-local caller is refused outright, so tunnelling a
+ * backend whose switch is off leaks nothing. On, the backend generates a code and
+ * prints it to *its own console window* — this page never shows it, which is why a
+ * settings page left open on a shared screen gives nothing away, and why "forgot
+ * it" is answered by printing it again rather than displaying it here.
  *
- * The switch is local-only, which is not just prudence: if a remote device could
- * flip it, whoever found an unclaimed tunnel URL could turn it on and claim the
- * backend out from under its owner.
+ * Not gated on `local`, deliberately. The backend cannot tell the owner browsing
+ * through their own tunnel URL from a phone on that tunnel, so a local-only switch
+ * would be dead exactly when the portal points at anything but localhost — a
+ * normal way to run this. Turning remote access *on* is still unreachable from
+ * outside (with the switch off, no remote caller is authorized at all), so an
+ * unclaimed backend cannot be claimed by a stranger who found its URL.
  */
 function RemoteAccessSection() {
   const toast = useToast();
@@ -144,9 +147,14 @@ function RemoteAccessSection() {
 
   async function toggle() {
     if (busy) return;
+    // Warn honestly: a remote browser is cutting off its own connection too.
     if (
       codeSet &&
-      !confirm("關閉遠端存取後，存取碼會被刪除，所有其他裝置都會立即斷線。確定嗎？")
+      !confirm(
+        local
+          ? "關閉遠端存取後，存取碼會被刪除，所有遠端裝置都會立即斷線。確定嗎？"
+          : "關閉遠端存取後，存取碼會被刪除，所有遠端裝置都會立即斷線——包括你現在這台。之後必須回到執行綠洲的那台電腦上才能重新開啟。確定嗎？",
+      )
     )
       return;
     setBusy(true);
@@ -206,80 +214,73 @@ function RemoteAccessSection() {
         </span>
       </div>
 
-      {!local ? (
-        <Field
-          title="遠端存取"
-          description="只有執行綠洲的那台電腦能開關遠端存取。請在該電腦上開啟此頁面來變更。"
+      <Field
+        title="開放其他裝置連線"
+        description={
+          codeSet
+            ? "已開啟：其他裝置（例如透過 ngrok 之類的通道連進來的手機）輸入存取碼後即可使用。存取碼只會顯示在後端的主控台視窗，不會出現在這個頁面上。執行綠洲的那台電腦本身不需要存取碼。"
+            : "目前僅限本機使用：任何來自其他裝置的連線都會被拒絕。開啟後，後端會產生一組存取碼並顯示在它的主控台視窗上，用手機等裝置連進來時輸入即可。"
+        }
+      >
+        <button
+          type="button"
+          role="switch"
+          aria-checked={codeSet}
+          onClick={toggle}
+          disabled={busy}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition cursor-pointer disabled:opacity-40 ${
+            codeSet ? "bg-accent" : "bg-surface-highest border border-border-hairline"
+          }`}
         >
-          <span className="text-xs text-text-tertiary">僅限本機管理</span>
-        </Field>
-      ) : (
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
+              codeSet ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </Field>
+
+      {codeSet && (
         <>
           <Field
-            title="開放其他裝置連線"
+            title="忘記存取碼？"
             description={
-              codeSet
-                ? "已開啟：其他裝置（例如透過 ngrok 之類的通道連進來的手機）輸入存取碼後即可使用。存取碼只會顯示在後端的主控台視窗，不會出現在這個頁面上。這台電腦本身不需要存取碼。"
-                : "目前僅限本機使用：任何來自其他裝置的連線都會被拒絕。開啟後，後端會產生一組存取碼並顯示在它的主控台視窗上，用手機等裝置連進來時輸入即可。"
+              local
+                ? "把目前的存取碼重新印在後端的主控台視窗上。若要換一組新的，把上面的開關關掉再打開即可——舊的存取碼會立刻失效，所有已連線的裝置都必須重新輸入。"
+                : "把目前的存取碼重新印在後端的主控台視窗上——也就是執行綠洲的那台電腦，你在這台裝置上看不到。若要換一組新的，把上面的開關關掉再打開即可，但你這台裝置也會跟著斷線。"
             }
           >
             <button
               type="button"
-              role="switch"
-              aria-checked={codeSet}
-              onClick={toggle}
+              onClick={reveal}
               disabled={busy}
-              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition cursor-pointer disabled:opacity-40 ${
-                codeSet ? "bg-accent" : "bg-surface-highest border border-border-hairline"
-              }`}
+              className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
             >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform duration-200 ${
-                  codeSet ? "translate-x-6" : "translate-x-1"
-                }`}
-              />
+              在主控台顯示存取碼
             </button>
           </Field>
 
-          {codeSet && (
-            <>
-              <Field
-                title="忘記存取碼？"
-                description="把目前的存取碼重新印在後端的主控台視窗上。若要換一組新的，把上面的開關關掉再打開即可——舊的存取碼會立刻失效，所有已連線的裝置都必須重新輸入。"
-              >
-                <button
-                  type="button"
-                  onClick={reveal}
-                  disabled={busy}
-                  className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
-                >
-                  在主控台顯示存取碼
-                </button>
-              </Field>
-
-              <Field
-                title="配對其他裝置"
-                description="用手機掃描這個 QR code，就不必手動輸入一長串入口座標。QR code 只包含入口座標，不含存取碼——掃描後手機仍需輸入主控台上顯示的存取碼。"
-              >
-                <button
-                  type="button"
-                  onClick={showQr}
-                  disabled={busy}
-                  className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
-                >
-                  {qr ? "重新產生" : "顯示 QR code"}
-                </button>
-              </Field>
-              {qr && (
-                <div className="flex flex-col items-center gap-2 border-b border-border-hairline py-6">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={qr} alt="入口座標 QR code" className="rounded-lg bg-white p-2" width={240} height={240} />
-                  <p className="text-center text-xs text-text-tertiary">
-                    掃描後手機會先確認入口座標，接著輸入存取碼即可進入。
-                  </p>
-                </div>
-              )}
-            </>
+          <Field
+            title="配對其他裝置"
+            description="用手機掃描這個 QR code，就不必手動輸入一長串入口座標。QR code 只包含入口座標，不含存取碼——掃描後手機仍需輸入主控台上顯示的存取碼。"
+          >
+            <button
+              type="button"
+              onClick={showQr}
+              disabled={busy}
+              className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
+            >
+              {qr ? "重新產生" : "顯示 QR code"}
+            </button>
+          </Field>
+          {qr && (
+            <div className="flex flex-col items-center gap-2 border-b border-border-hairline py-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qr} alt="入口座標 QR code" className="rounded-lg bg-white p-2" width={240} height={240} />
+              <p className="text-center text-xs text-text-tertiary">
+                掃描後手機會先確認入口座標，接著輸入存取碼即可進入。
+              </p>
+            </div>
           )}
         </>
       )}

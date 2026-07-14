@@ -31,13 +31,24 @@ string, it *is* the bearer credential: there are no sessions to mint, track or
 revoke, and `<video src>` (which can carry a credential only as a query param)
 simply carries the code. Rotating it is "switch off, switch on".
 
-`is_local_request()` decides who is trusted, so its two halves are both
-load-bearing: a loopback peer **and** no `X-Forwarded-*`/proxy header. A tunnel
-agent runs on the user's own machine and therefore also connects from 127.0.0.1;
-what gives it away is the header it injects, which a client on the far side
-cannot strip. A raw TCP forward (`ssh -R`) adds no headers and is the known,
-accepted gap: someone who exposes their backend that way hands out local trust
-along with it, and should use a tunnel that sets the headers instead.
+`is_local_request()` decides who is trusted, and it is about where the *request*
+came from, not where the page did: almost every user runs the public website
+(oasis.fusion-labs.cc) against their own localhost backend, so the browser that
+manages this backend is nearly always showing a page served from somewhere else.
+The peer socket is what tells them apart, and all three of its checks earn their
+place:
+
+  * **A loopback peer.** Necessary, and on its own useless: a tunnel agent runs on
+    the user's own machine and so also connects from 127.0.0.1.
+  * **No `X-Forwarded-*`/proxy header.** What catches an HTTP tunnel (ngrok,
+    cloudflared): it injects them, and a client on the far side cannot strip them.
+  * **A loopback `Host`.** What catches a tunnel that injects *nothing* — `ssh -R`,
+    `ngrok tcp`, Tailscale Funnel. Those pass the client's own Host straight
+    through, and a phone reaching this backend through a tunnel asked for the
+    tunnel's domain, whereas a browser on this machine can only have been pointed
+    at localhost. Without this check such a forward hands out full local trust
+    along with the port — the code becomes decorative, and a remote device can
+    launch a player on the owner's desktop.
 """
 
 import hmac
@@ -64,6 +75,11 @@ _PROXY_HEADERS = (
     'via',
     'cf-connecting-ip',
 )
+
+# The addresses a browser on *this* machine can be pointed at. 0.0.0.0 is in here
+# because people do type it and it is unroutable from anywhere else, so a Host of
+# 0.0.0.0 still cannot have come from another device.
+_LOCAL_HOST_NAMES = {'localhost', '0.0.0.0'}
 
 # The code is read off a console window and typed into a phone, so the alphabet
 # drops the characters people mistake for each other (I/1, O/0) and the code is
@@ -179,13 +195,42 @@ def print_code() -> None:
 # Request classification and throttling
 # --------------------------------------------------------------------------- #
 
+def _host_is_local(request) -> bool:
+    """True when the caller addressed this backend *as* localhost.
+
+    The one thing a forwarder cannot fake on the client's behalf. A phone reaching
+    the backend through a tunnel asks for the tunnel's domain, so that is the Host
+    its browser sends; a browser on this machine can only ever have been pointed at
+    localhost / 127.0.0.1. Header-less forwarders (ssh -R, `ngrok tcp`, Tailscale
+    Funnel) pass the client's Host straight through, which is exactly what gives
+    them away — the peer socket and the proxy headers do not.
+    """
+    host = request.headers.get('host', '').strip()
+    if not host:
+        return False
+    if host.startswith('['):          # [::1]:8000
+        name = host[1:].split(']', 1)[0]
+    else:                             # localhost:8000 / 127.0.0.1:8000 / localhost
+        name = host.rsplit(':', 1)[0] if ':' in host else host
+    name = name.lower()
+    if name in _LOCAL_HOST_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
 def is_local_request(request) -> bool:
     """True only for a request that physically originated on this machine.
 
-    Loopback peer AND no forwarding header — see the module docstring for why
-    both are required, and for the one gap this knowingly leaves open.
+    All three of: a loopback peer, no forwarding header, and a loopback Host. Each
+    covers what the others miss — see the module docstring, and _host_is_local for
+    why the Host is the half that catches a tunnel adding no headers at all.
     """
     if any(h in request.headers for h in _PROXY_HEADERS):
+        return False
+    if not _host_is_local(request):
         return False
     client = request.client
     if client is None or not client.host:

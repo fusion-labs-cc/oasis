@@ -77,13 +77,22 @@ CLIENT_HEADER = 'x-oasis-client'
 _OPEN_PATHS = {'/api/health', '/api/auth/login'}
 
 # Refused for anyone not physically at this machine, *even with the right code*.
-# A phone on the tunnel is for browsing and watching; these reach out of the
-# browser and touch the desktop, so a leaked code must not be enough to launch a
-# player in the user's living room or push code onto their PC. The remote-access
-# switch is local-only for the same reason, plus one more: a remote device must
-# never be able to flip it — whoever found an unclaimed tunnel URL could
-# otherwise turn it on and claim the backend out from under its owner.
-_LOCAL_ONLY_PATHS = ('/api/update/apply', '/api/auth/remote', '/api/auth/reveal')
+# These two reach out of the browser and touch the desktop — one launches a player
+# on the owner's screen, the other pushes code onto their PC — so a leaked code
+# must not be enough to fire them.
+#
+# The remote-access switch (/api/auth/remote) is deliberately *not* here, even
+# though it manages the code. The backend cannot tell the owner browsing through
+# their own tunnel URL from a phone on that tunnel — both arrive with proxy
+# headers — so keeping the switch local-only meant the settings page was dead
+# whenever the portal pointed at anything but localhost, which is a normal way to
+# use this thing. Nothing is given away by allowing it: the one attack that
+# mattered — a stranger finding an unclaimed tunnel URL and turning remote access
+# on to claim the backend — is impossible regardless, because with the switch off
+# no remote caller is authorized and the endpoint is never reached. What a leaked
+# code now also buys is turning remote access off, or rotating it: an annoyance,
+# recoverable at the machine, and no escalation.
+_LOCAL_ONLY_PATHS = ('/api/update/apply',)
 _LOCAL_ONLY_SUFFIXES = ('/open',)
 
 
@@ -283,12 +292,17 @@ def auth_login(payload: LoginRequest, request: Request):
 
 @app.post('/api/auth/remote')
 def auth_enable_remote():
-    """Turn remote access on and mint a fresh code (local machine only).
+    """Turn remote access on and mint a fresh code.
 
     The code goes to the console, never to the caller: the web UI never displays
     it, so a settings page left open on a shared screen gives nothing away. Always
     a *new* code, so flipping the switch off and on is how a user rotates it and
-    cuts off every device that had the old one.
+    cuts off every device that had the old one — this caller included, if it got in
+    with the old code.
+
+    Any authorized caller may fire this, but only a *local* one can reach it while
+    the switch is off (a remote caller is refused before the middleware ever gets
+    here), so an unclaimed backend still cannot be claimed from the outside.
     """
     auth.enable()
     auth.print_code()
@@ -297,10 +311,11 @@ def auth_enable_remote():
 
 @app.delete('/api/auth/remote')
 def auth_disable_remote():
-    """Turn remote access off (local machine only).
+    """Turn remote access off.
 
     Not a way to make the backend *less* safe: with no code, every non-local
-    request is refused outright. It only gives up the ability to use it remotely.
+    request is refused outright. It only gives up the ability to use it remotely —
+    including for whoever just fired this, if they were remote.
     """
     auth.disable()
     print('🔓 遠端存取已關閉：僅限本機使用，所有遠端連線一律拒絕。')
@@ -309,11 +324,12 @@ def auth_disable_remote():
 
 @app.post('/api/auth/reveal')
 def auth_reveal():
-    """Print the current code to the backend's console again (local machine only).
+    """Print the current code to the backend's console again.
 
     What a user who forgot it clicks. It is answered on the console rather than in
-    the response body on purpose — the browser is never told the code, so this
-    stays useless to anyone who isn't sitting at the machine.
+    the response body on purpose — the browser is never told the code. That is also
+    what makes it safe to let a remote caller fire it: all they achieve is printing
+    a code they already hold onto a screen they cannot see.
     """
     if not auth.has_code():
         raise HTTPException(status_code=400, detail='此後端未開放遠端存取')
