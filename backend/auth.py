@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Access-code authentication for the local backend.
+"""Access code for remote use of the local backend.
 
 Why this exists: the CORS allowlist and the X-Oasis-Client header are *browser*
 guards. They stop a random website the user visits from calling their localhost,
@@ -11,31 +11,35 @@ cloudflared, …) so they can watch from their phone: anyone with the URL could
 read the catalog, delete files, launch a player on the user's desktop, or trigger
 a self-update.
 
-The model:
+The model, in one line: **this machine is always trusted; remote access is a
+switch, and the switch mints a code.**
 
-  * **No access code set → local-only.** Everything from this machine works with
-    no credential at all (the double-click-and-go experience is untouched), and
-    every non-local request is refused outright. An un-configured backend simply
-    cannot be used from anywhere else, so a user who tunnels one *before* setting
-    a code exposes nothing.
-  * **Access code set → everyone authenticates, local included.** The code is
-    chosen by the user, so it is never stored: only its scrypt hash is. Devices
-    exchange the code for a random **session token** once (/api/auth/login) and
-    send that thereafter, which keeps the password out of URLs (the <video> tag
-    can only carry a credential as a query param) and makes revocation possible.
+  * **Remote access off (the default).** Requests from this machine need no
+    credential at all — double-click and go — and every non-local request is
+    refused outright. There is nothing to configure and nothing to leak, so
+    tunnelling an un-configured backend exposes nothing.
+  * **Remote access on.** The backend *generates* a random code and prints it to
+    its own console window. Remote devices must present it; this machine still
+    needs nothing. Turning the switch off deletes the code, which is also how
+    every paired device is cut off at once.
 
-`is_local_request()` is therefore only ever used to decide who may *set* the
-code, never to hand out a secret. That is the whole reason it is safe: an
-attacker who manages to look local (a raw `ssh -R` forward adds no proxy headers
-and is indistinguishable from a loopback client) still learns nothing and gets
-nowhere, because there is no secret to be handed and the code is what he lacks.
-The one thing he could do is claim an *unclaimed* backend — which is exactly why
-setting the first code is local-only too: a remote device is never shown the
-setup form, so it cannot squat a code and lock the owner out of their own machine.
+The code being machine-generated (not a user's password) is what lets the rest
+be so small. It is unique to this backend and reused nowhere, so it is stored in
+plain text — which is the whole point: the owner can ask for it to be printed
+again when they forget it. And because it is already a high-entropy random
+string, it *is* the bearer credential: there are no sessions to mint, track or
+revoke, and `<video src>` (which can carry a credential only as a query param)
+simply carries the code. Rotating it is "switch off, switch on".
+
+`is_local_request()` decides who is trusted, so its two halves are both
+load-bearing: a loopback peer **and** no `X-Forwarded-*`/proxy header. A tunnel
+agent runs on the user's own machine and therefore also connects from 127.0.0.1;
+what gives it away is the header it injects, which a client on the far side
+cannot strip. A raw TCP forward (`ssh -R`) adds no headers and is the known,
+accepted gap: someone who exposes their backend that way hands out local trust
+along with it, and should use a tunnel that sets the headers instead.
 """
 
-import base64
-import hashlib
 import hmac
 import ipaddress
 import json
@@ -49,10 +53,7 @@ _DB_PATH = os.environ.get('DB_PATH') or os.path.join(os.path.dirname(os.path.abs
 AUTH_PATH = os.path.join(os.path.dirname(os.path.abspath(_DB_PATH)), 'oasis.auth.json')
 
 # Any of these means the request passed through a proxy or tunnel, so it did not
-# originate on this machine — no matter what the peer socket says. A tunnel agent
-# runs on the user's own machine and therefore also connects from 127.0.0.1; what
-# gives it away is the header it injects, which a client on the far side cannot
-# strip.
+# originate on this machine — no matter what the peer socket says.
 _PROXY_HEADERS = (
     'x-forwarded-for',
     'x-forwarded-host',
@@ -64,21 +65,18 @@ _PROXY_HEADERS = (
     'cf-connecting-ip',
 )
 
-# scrypt work factors. ~100 ms per verification on a typical machine — slow enough
-# that a stolen oasis.auth.json is not worth grinding through, fast enough that a
-# login doesn't feel stuck. Only ever paid on /api/auth/login, never per request:
-# every other call presents a session token, which is a cheap digest compare.
-_SCRYPT_N = 2 ** 14
-_SCRYPT_R = 8
-_SCRYPT_P = 1
-_SCRYPT_DKLEN = 32
+# The code is read off a console window and typed into a phone, so the alphabet
+# drops the characters people mistake for each other (I/1, O/0) and the code is
+# grouped for legibility. 8 chars over 32 symbols = 40 bits — unguessable at the
+# handful of tries per minute the throttle below allows.
+_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+_CODE_LEN = 8
+_GROUP = 4
 
-MIN_CODE_LENGTH = 6
-
-# Brute-force throttle, counted against *wrong access codes only*. An invalid
-# session token is not throttled: it cannot be guessed (256 bits of randomness),
-# and counting it would let a device whose session was just revoked lock itself —
-# and the owner — out by doing nothing but polling /api/health in the background.
+# Brute-force throttle. Counted only against a *wrong* code: a request with no
+# code at all is just an un-paired device (or a poll from a phone whose code was
+# revoked), and counting those would let such a device lock the owner out by
+# doing nothing but retrying in the background.
 _FAIL_LIMIT = 5          # wrong codes tolerated before the lockout starts
 _LOCK_BASE_S = 5         # first lockout, doubling with each further failure
 _LOCK_MAX_S = 300
@@ -89,10 +87,7 @@ _failures: dict[str, tuple[int, float]] = {}
 
 
 # --------------------------------------------------------------------------- #
-# Persistent state: the code's hash and the tokens of paired devices.
-#
-# Sessions are stored as *digests* of the tokens, not the tokens themselves, so
-# this file cannot be replayed: whoever reads it still has no usable credential.
+# The code itself
 # --------------------------------------------------------------------------- #
 
 def _load() -> dict:
@@ -104,7 +99,7 @@ def _load() -> dict:
     except FileNotFoundError:
         pass
     except (OSError, json.JSONDecodeError) as e:
-        print(f'⚠️ 無法讀取存取碼設定，將視為尚未設定: {e}')
+        print(f'⚠️ 無法讀取遠端存取設定，將視為未開啟: {e}')
     return {}
 
 
@@ -117,98 +112,67 @@ def _save(data: dict) -> None:
         # Windows, which ignores POSIX modes.
         os.chmod(AUTH_PATH, 0o600)
     except OSError as e:
-        print(f'⚠️ 無法寫入存取碼設定: {e}')
+        print(f'⚠️ 無法寫入遠端存取設定: {e}')
 
 
-def _derive(code: str, salt: bytes) -> bytes:
-    return hashlib.scrypt(
-        code.encode('utf-8'),
-        salt=salt,
-        n=_SCRYPT_N,
-        r=_SCRYPT_R,
-        p=_SCRYPT_P,
-        dklen=_SCRYPT_DKLEN,
-    )
+def normalize(code: str | None) -> str:
+    """Canonical form of a code as typed: grouping and case are cosmetic."""
+    if not code:
+        return ''
+    return ''.join(c for c in code.upper() if c.isalnum())
+
+
+def get_code() -> str | None:
+    """The current access code, or None when remote access is off."""
+    code = _load().get('code')
+    return code if isinstance(code, str) and code else None
 
 
 def has_code() -> bool:
-    """True once the user has set an access code (i.e. remote access is enabled)."""
-    data = _load()
-    return bool(data.get('hash') and data.get('salt'))
+    return get_code() is not None
 
 
-def verify_code(code: str) -> bool:
-    """Constant-time check of a candidate access code against the stored hash."""
-    data = _load()
-    stored, salt = data.get('hash'), data.get('salt')
-    if not stored or not salt:
-        return False
-    try:
-        expected = base64.b64decode(stored)
-        derived = _derive(code, base64.b64decode(salt))
-    except (ValueError, TypeError):
-        return False
-    return hmac.compare_digest(derived, expected)
-
-
-def set_code(code: str) -> None:
-    """Set or replace the access code.
-
-    Every existing session is dropped: changing the code is how a user cuts off a
-    device (or a leaked pairing QR), so it has to actually cut them off. The
-    caller gets a fresh session back so the browser that just changed it stays in.
-    """
-    if len(code) < MIN_CODE_LENGTH:
-        raise ValueError(f'存取碼至少需要 {MIN_CODE_LENGTH} 個字元')
-    salt = secrets.token_bytes(16)
-    _save({
-        'salt': base64.b64encode(salt).decode('ascii'),
-        'hash': base64.b64encode(_derive(code, salt)).decode('ascii'),
-        'sessions': [],
-        'updated_at': int(time.time()),
-    })
+def enable() -> str:
+    """Turn remote access on with a freshly minted code (replacing any existing
+    one, which is what cuts every already-paired device off)."""
+    raw = ''.join(secrets.choice(_ALPHABET) for _ in range(_CODE_LEN))
+    code = '-'.join(raw[i:i + _GROUP] for i in range(0, _CODE_LEN, _GROUP))
+    _save({'code': code, 'updated_at': int(time.time())})
     _failures.clear()
+    return code
 
 
-def clear_code() -> None:
-    """Remove the access code, returning the backend to local-only mode."""
+def disable() -> None:
+    """Turn remote access off: the code is deleted and every remote caller is
+    refused outright again. This machine is unaffected — it never needed one."""
     _save({})
     _failures.clear()
 
 
-# --------------------------------------------------------------------------- #
-# Sessions
-# --------------------------------------------------------------------------- #
-
-def _digest(token: str) -> str:
-    return hashlib.sha256(token.encode('utf-8')).hexdigest()
-
-
-def create_session() -> str:
-    """Mint a session token for a device that has proved it knows the code.
-
-    Also what a pairing QR carries: it is the code's *stand-in*, so a scanned
-    phone is logged in without the password ever leaving the owner's screen, and
-    can be cut off later without changing the password... (by changing it, which
-    drops all sessions — a per-device revoke isn't worth the bookkeeping yet).
-    """
-    token = secrets.token_urlsafe(32)
-    data = _load()
-    sessions = data.get('sessions') or []
-    sessions.append(_digest(token))
-    data['sessions'] = sessions
-    _save(data)
-    return token
-
-
-def session_valid(token: str | None) -> bool:
-    if not token:
+def verify(candidate: str | None) -> bool:
+    """Constant-time check of a presented code against the stored one."""
+    code = get_code()
+    if not code:
         return False
-    wanted = _digest(token)
-    # compare_digest against each stored digest rather than a set lookup: the
-    # token is high-entropy so timing is not a real threat here, but it costs
-    # nothing to not leak a prefix match.
-    return any(hmac.compare_digest(wanted, s) for s in (_load().get('sessions') or []))
+    return hmac.compare_digest(normalize(candidate), normalize(code))
+
+
+def print_code() -> None:
+    """Print the code to the backend's own console — the only place it is ever
+    shown. The web UI never displays it, so a settings page left open (or a
+    screenshot of it) gives the code away to nobody."""
+    code = get_code()
+    if not code:
+        print('🔓 遠端存取未開啟：僅限本機使用，所有遠端連線一律拒絕。')
+        return
+    # No box: CJK glyphs are double-width and would never line up with the frame.
+    rule = '═' * 40
+    print(f'\n{rule}')
+    print('🔐 遠端存取已開啟')
+    print(f'   存取碼： {code}')
+    print('   其他裝置連線時需輸入此存取碼（本機不需要）。')
+    print('   忘記了可到「設定 → 遠端存取」再顯示一次。')
+    print(f'{rule}\n')
 
 
 # --------------------------------------------------------------------------- #
@@ -219,7 +183,7 @@ def is_local_request(request) -> bool:
     """True only for a request that physically originated on this machine.
 
     Loopback peer AND no forwarding header — see the module docstring for why
-    both are required, and for what this is (and is not) allowed to gate.
+    both are required, and for the one gap this knowingly leaves open.
     """
     if any(h in request.headers for h in _PROXY_HEADERS):
         return False
@@ -276,13 +240,13 @@ def clear_failures(key: str) -> None:
     _failures.pop(key, None)
 
 
-def extract_token(request) -> str | None:
-    """Pull the session token from the Authorization header.
+def extract_code(request) -> str | None:
+    """Pull the access code from the Authorization header.
 
     <video src> can send neither a header nor a cookie, so /api/stream is also
     allowed to carry it as a `token` query parameter — see the caller.
     """
     header = request.headers.get('authorization', '')
     if header.lower().startswith('bearer '):
-        return header[7:].strip()
+        return header[7:].strip() or None
     return None

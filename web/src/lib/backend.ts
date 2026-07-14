@@ -29,29 +29,32 @@ export function setBackendUrl(url: string): void {
   else window.localStorage.removeItem(STORAGE_KEY);
 }
 
-// Session token for the backend, attached to every /api/* call (see backendFetch).
-// It is what the access code is exchanged for at /api/auth/login — the code
-// itself is never stored and never travels again, so it stays out of URLs, logs
-// and <video> srcs. A backend with no code set wants no token at all (it is in
-// local-only mode and simply refuses everyone else).
+// The access code, attached to every /api/* call (see backendFetch). The backend
+// generates it and prints it to its own console; a remote device is told it once
+// by the user and stores it here. It *is* the credential — there is no session to
+// exchange it for — so rotating it is done at the backend (switch off, switch on),
+// which is what invalidates every copy of it at once.
+//
+// The machine running the backend needs none of this: it is trusted for being
+// local. Only devices coming in over a tunnel ever hold a code.
 //
 // Keyed *per backend URL*: the same browser may talk to localhost at home and to
-// a tunnel URL from elsewhere, and a session issued by one must never be sent to
-// the other — nor be clobbered by it.
-function sessionKey(url: string): string {
-  return `oasis:session:${normalize(url)}`;
+// a tunnel URL from elsewhere, and a code that belongs to one must never be sent
+// to the other — nor be clobbered by it.
+function codeKey(url: string): string {
+  return `oasis:code:${normalize(url)}`;
 }
 
-export function getSessionToken(url: string = getBackendUrl()): string {
+export function getAccessCode(url: string = getBackendUrl()): string {
   if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(sessionKey(url)) ?? "";
+  return window.localStorage.getItem(codeKey(url)) ?? "";
 }
 
-export function setSessionToken(token: string, url: string = getBackendUrl()): void {
+export function storeAccessCode(code: string, url: string = getBackendUrl()): void {
   if (typeof window === "undefined") return;
-  const clean = token.trim();
-  if (clean) window.localStorage.setItem(sessionKey(url), clean);
-  else window.localStorage.removeItem(sessionKey(url));
+  const clean = code.trim();
+  if (clean) window.localStorage.setItem(codeKey(url), clean);
+  else window.localStorage.removeItem(codeKey(url));
 }
 
 // "Authorized" flag: set once the user has successfully entered the OASIS.

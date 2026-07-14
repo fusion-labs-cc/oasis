@@ -1,7 +1,7 @@
 // Shared types + client helpers. The browser calls the user's local FastAPI
 // backend directly (see getBackendUrl); there is no server-side proxy.
 
-import { getBackendUrl, getSessionToken } from "./backend";
+import { getAccessCode, getBackendUrl } from "./backend";
 
 export interface VideoRecord {
   id?: number;
@@ -50,31 +50,31 @@ const CLIENT_HEADER: Record<string, string> = {
   "ngrok-skip-browser-warning": "true",
 };
 
-// fetch() against the local backend with the client header and the session token
-// always attached. The header above is only a CSRF guard — it is public and
-// fixed, so it proves nothing about *who* is calling and is worthless against
-// anything that isn't a browser (a plain `curl` ignores CORS entirely). The
-// bearer session is the actual authentication, and it is what makes it safe to
-// put the backend behind a tunnel so a phone can reach it.
+// fetch() against the local backend with the client header and, if this device
+// holds one, the access code always attached. The header above is only a CSRF
+// guard — it is public and fixed, so it proves nothing about *who* is calling and
+// is worthless against anything that isn't a browser (a plain `curl` ignores CORS
+// entirely). The bearer code is the actual authentication, and it is what makes
+// it safe to put the backend behind a tunnel so a phone can reach it. On the
+// machine running the backend there is no code and none is needed: it is trusted
+// for being local.
 export function backendFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const token = getSessionToken();
+  const code = getAccessCode();
   return fetch(backendUrl(path), {
     ...init,
     headers: {
       ...CLIENT_HEADER,
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(code ? { Authorization: `Bearer ${code}` } : {}),
       ...(init.headers ?? {}),
     },
   });
 }
 
 // <video src> can send neither a header nor a cookie, so streaming carries the
-// session in the query string instead (the backend accepts it on /api/stream
-// only). This is a session token, never the access code — which is precisely why
-// the code is exchanged for one rather than sent on every call.
+// code in the query string instead (the backend accepts it on /api/stream only).
 export function streamUrl(videoId: number): string {
-  const token = getSessionToken();
-  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  const code = getAccessCode();
+  const query = code ? `?token=${encodeURIComponent(code)}` : "";
   return backendUrl(`/api/stream/${videoId}${query}`);
 }
 
@@ -101,14 +101,14 @@ export const HEALTH_TIMEOUT_MS = 3000;
 export interface HealthResult {
   // Backend reachable at all.
   ok: boolean;
-  // An access code has been set, so this backend accepts remote devices (with
-  // the code). False = local-only mode: it refuses every non-local caller.
+  // Remote access is on, so this backend accepts other devices (with the code).
+  // False = local-only: it refuses every non-local caller outright.
   codeSet: boolean;
-  // We may use the API right now — either we hold a valid session, or no code is
-  // set and we are local.
+  // We may use the API right now — either we hold the right code, or we are on
+  // the backend's own machine and need none.
   authenticated: boolean;
-  // This browser is on the backend's own machine, so it may manage the access
-  // code. False for a phone coming in over a tunnel.
+  // This browser is on the backend's own machine, so it may flip the remote-access
+  // switch. False for a phone coming in over a tunnel.
   local: boolean;
 }
 
@@ -136,8 +136,9 @@ export async function checkHealth(signal?: AbortSignal): Promise<HealthResult> {
   }
 }
 
-// Exchange the access code for a session token. The only call that ever carries
-// the code; everything after this presents the session it returns.
+// Check an access code with the backend before storing it. The code itself stays
+// the credential — this only confirms it is the right one (and is the call whose
+// failures the backend throttles), returning it in canonical form.
 export async function login(code: string): Promise<string> {
   const res = await backendFetch("/api/auth/login", {
     method: "POST",
@@ -149,36 +150,26 @@ export async function login(code: string): Promise<string> {
   return data.token as string;
 }
 
-// Set or change the access code (local machine only). `current` is required once
-// one exists. Returns a fresh session, since changing the code drops all others.
-export async function setAccessCode(code: string, current?: string): Promise<string> {
-  const res = await backendFetch("/api/auth/code", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, current: current ?? null }),
-  });
-  if (!res.ok) throw new Error(await parseError(res));
-  const data = await res.json();
-  return data.token as string;
-}
-
-// Remove the access code, returning the backend to local-only mode (local only).
-export async function clearAccessCode(current: string): Promise<void> {
-  const res = await backendFetch("/api/auth/code", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ current }),
-  });
+// Turn remote access on (local machine only). The backend mints a fresh code and
+// prints it to *its own console* — it is never returned here, so the code cannot
+// leak from this page. Always a new code, so this doubles as "rotate".
+export async function enableRemoteAccess(): Promise<void> {
+  const res = await backendFetch("/api/auth/remote", { method: "POST" });
   if (!res.ok) throw new Error(await parseError(res));
 }
 
-// Mint a session token for another device — what the pairing QR carries, so the
-// phone is logged in without the access code ever leaving this screen.
-export async function createPairingToken(): Promise<string> {
-  const res = await backendFetch("/api/auth/pair", { method: "POST" });
+// Turn remote access off (local machine only): the code is deleted, every device
+// holding it is cut off, and non-local callers are refused outright again.
+export async function disableRemoteAccess(): Promise<void> {
+  const res = await backendFetch("/api/auth/remote", { method: "DELETE" });
   if (!res.ok) throw new Error(await parseError(res));
-  const data = await res.json();
-  return data.token as string;
+}
+
+// Ask the backend to print the current code to its console again — what a user
+// who forgot it clicks. The answer arrives on the console, not in this response.
+export async function revealAccessCode(): Promise<void> {
+  const res = await backendFetch("/api/auth/reveal", { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
 }
 
 export interface UpdateInfo {

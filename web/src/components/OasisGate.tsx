@@ -43,21 +43,20 @@ const PORTAL_DOWNLOADS: { label: string; url: string }[] = [
   { label: "Windows", url: process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_WIN || "" },
 ].filter((d) => d.url);
 
-// A pairing QR encodes the backend URL plus a session token minted on the
-// owner's PC, so a scanned phone lands logged in and the access code never
-// leaves that screen. Carried in the URL *fragment*, which browsers never send
-// to the server, and wiped from the address bar the moment it is read.
+// A pairing QR encodes the backend URL — nothing else. It exists to spare the
+// user typing a long tunnel URL into a phone; it carries no credential, so a
+// scanned phone still has to be told the access code (which only ever appears on
+// the backend's console). Carried in the URL *fragment*, which browsers never
+// send to a server, and wiped from the address bar the moment it is read.
 const PAIR_FRAGMENT = "oasis-pair=";
 
-function readPairingFragment(): { url: string; token: string } | null {
+function readPairingFragment(): string | null {
   const hash = window.location.hash.slice(1);
   if (!hash.startsWith(PAIR_FRAGMENT)) return null;
   try {
     const raw = atob(hash.slice(PAIR_FRAGMENT.length).replace(/-/g, "+").replace(/_/g, "/"));
     const data = JSON.parse(raw);
-    if (typeof data.u === "string" && typeof data.t === "string") {
-      return { url: data.u, token: data.t };
-    }
+    if (typeof data.u === "string" && data.u) return data.u;
   } catch {
     // Malformed link — fall through to the normal gate.
   }
@@ -65,8 +64,7 @@ function readPairingFragment(): { url: string; token: string } | null {
 }
 
 export default function OasisGate() {
-  const { status, downReason, backendUrl, updateBackendUrl, codeSet, submitCode, applyPairing } =
-    useBackend();
+  const { status, downReason, backendUrl, updateBackendUrl, codeSet, submitCode } = useBackend();
 
   // Overlay lifecycle: shown while gated, briefly "revealing" on connect, then
   // fully unmounted so the app beneath is interactive. `visibleRef` mirrors
@@ -84,10 +82,10 @@ export default function OasisGate() {
   // Lets someone stuck on the code prompt go back and retarget a different
   // backend instead (e.g. they pasted the wrong tunnel URL).
   const [editingUrl, setEditingUrl] = useState(false);
-  // A scanned pairing link, held until the user confirms the destination. Never
+  // A scanned pairing link's backend URL, held until the user confirms it. Never
   // applied silently: a link is something someone else can send you, and applying
   // it unasked would let them point this browser at a backend of their choosing.
-  const [pending, setPending] = useState<{ url: string; token: string } | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
   // Failure feedback: a brief screen shake + faster-rising motes when a
   // user-initiated connection attempt comes back unreachable.
   const [shaking, setShaking] = useState(false);
@@ -113,11 +111,11 @@ export default function OasisGate() {
   }, [backendUrl]);
 
   // Pick up a scanned pairing link, and scrub it from the address bar (and from
-  // history) straight away so the session token doesn't linger there.
+  // history) straight away so a stale backend URL can't be re-applied on reload.
   useEffect(() => {
-    const pair = readPairingFragment();
-    if (!pair) return;
-    setPending(pair);
+    const url = readPairingFragment();
+    if (!url) return;
+    setPending(url);
     window.history.replaceState(null, "", window.location.pathname + window.location.search);
   }, []);
 
@@ -180,9 +178,9 @@ export default function OasisGate() {
     updateBackendUrl(url);
   }
 
-  // Log in with the access code from the owner's PC. The backend URL is already
-  // the right one by the time this form shows (that is how we learned a code was
-  // wanted), so the session is filed against the correct host.
+  // Enter the access code the backend printed on its own console. The backend URL
+  // is already the right one by the time this form shows (that is how we learned a
+  // code was wanted), so the code is filed against the correct host.
   async function enterCode() {
     const code = codeDraft.trim();
     if (!code || submitting) return;
@@ -199,12 +197,17 @@ export default function OasisGate() {
     }
   }
 
-  async function acceptPairing() {
+  // Adopt the scanned backend URL. There is no credential in the link, so this is
+  // exactly the manual "enter the coordinates" path — the gate will then ask for
+  // the access code, which the user reads off the backend's console.
+  function acceptPairing() {
     if (!pending) return;
-    const { url, token } = pending;
+    const url = pending;
     setPending(null);
     attempted.current = true;
-    await applyPairing(url, token);
+    setEditingUrl(false);
+    setAuthError("");
+    updateBackendUrl(url);
   }
 
   if (!visible) return null;
@@ -311,13 +314,13 @@ export default function OasisGate() {
                   className="h-2 w-2 rounded-full bg-[#4be1ff] shadow-[0_0_10px_rgba(75,225,255,0.8)]"
                   style={{ animation: "oasis-pulse 1.1s ease-in-out infinite" }}
                 />
-                偵測到配對連結
+                偵測到入口座標
               </div>
               <p className="mb-3 text-left text-[11px] leading-relaxed text-white/40">
-                要將這台裝置連線到以下綠洲嗎？只有在這是你自己的入口座標時才繼續。
+                要將這台裝置連線到以下綠洲嗎？只有在這是你自己的入口座標時才繼續。連線後仍需輸入存取碼。
               </p>
               <code className="mb-4 block w-full truncate rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 text-left font-mono text-xs text-white/80">
-                {pending.url}
+                {pending}
               </code>
               <div className="flex gap-2">
                 <button
@@ -379,10 +382,10 @@ export default function OasisGate() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") enterCode();
                   }}
-                  placeholder="輸入存取碼"
+                  placeholder="XXXX-XXXX"
                   autoComplete="current-password"
                   spellCheck={false}
-                  className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm text-white/90 outline-none backdrop-blur transition placeholder:text-white/25 focus:border-[#7aa2ff] focus:bg-white/[0.07]"
+                  className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white/90 outline-none backdrop-blur transition placeholder:normal-case placeholder:tracking-normal placeholder:text-white/25 focus:border-[#7aa2ff] focus:bg-white/[0.07]"
                 />
                 <button
                   type="button"
@@ -399,7 +402,7 @@ export default function OasisGate() {
                 </p>
               ) : (
                 <p className="mt-3 text-left text-[11px] leading-relaxed text-white/30">
-                  輸入你在電腦上設定的存取碼。此裝置只需驗證一次。
+                  存取碼顯示在執行綠洲那台電腦的主控台視窗上。此裝置只需輸入一次。
                 </p>
               )}
               <button
@@ -422,8 +425,8 @@ export default function OasisGate() {
                 尚未開放遠端存取
               </div>
               <p className="text-left text-[11px] leading-relaxed text-white/40">
-                這座綠洲還沒有設定存取碼，因此只接受本機連線。請到執行綠洲的那台電腦上開啟「設定 →
-                遠端存取」設定存取碼，即可用這台裝置進入。
+                這座綠洲目前只接受本機連線。請到執行綠洲的那台電腦上開啟「設定 →
+                遠端存取」，打開開關後主控台會顯示存取碼，即可用這台裝置進入。
               </p>
               <button
                 type="button"

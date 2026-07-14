@@ -65,25 +65,25 @@ app.add_middleware(
 # below), which closes CSRF on side-effecting endpoints such as open-in-player.
 #
 # It says nothing about *who* is calling, though: only a browser is bound by
-# CORS, so this stops nothing that isn't one. Authentication is the access code /
-# session token checked below (auth.py); this header stays as the CSRF half.
+# CORS, so this stops nothing that isn't one. Authentication is the access code
+# checked below (auth.py); this header stays as the CSRF half.
 CLIENT_HEADER = 'x-oasis-client'
 
-# Reachable without a session. /api/health is what the frontend polls to decide
-# whether the backend is even up, and it must answer before the caller is logged
-# in — it reveals nothing but liveness, whether an access code is set, and whether
-# this caller is authenticated. /api/auth/login is where a code is exchanged for a
-# session, so it cannot itself require one.
+# Reachable without a code. /api/health is what the frontend polls to decide
+# whether the backend is even up, and it must answer before the caller is paired —
+# it reveals nothing but liveness, whether remote access is on, and where this
+# caller stands. /api/auth/login is where a code is checked, so it cannot itself
+# require one.
 _OPEN_PATHS = {'/api/health', '/api/auth/login'}
 
-# Refused for anyone not physically at this machine, *even with a valid session*.
+# Refused for anyone not physically at this machine, *even with the right code*.
 # A phone on the tunnel is for browsing and watching; these reach out of the
-# browser and touch the desktop, so a leaked session must not be enough to launch
-# a player in the user's living room or push code onto their PC. Managing the
-# access code is local-only for the same reason, plus one more: a remote device
-# must never be shown the setup form, or an attacker could claim an unconfigured
-# backend and lock its owner out (see auth.py's docstring).
-_LOCAL_ONLY_PATHS = ('/api/update/apply', '/api/auth/code', '/api/auth/pair')
+# browser and touch the desktop, so a leaked code must not be enough to launch a
+# player in the user's living room or push code onto their PC. The remote-access
+# switch is local-only for the same reason, plus one more: a remote device must
+# never be able to flip it — whoever found an unclaimed tunnel URL could
+# otherwise turn it on and claim the backend out from under its owner.
+_LOCAL_ONLY_PATHS = ('/api/update/apply', '/api/auth/remote', '/api/auth/reveal')
 _LOCAL_ONLY_SUFFIXES = ('/open',)
 
 
@@ -118,36 +118,51 @@ async def require_auth(request: Request, call_next):
     if not path.startswith('/api/stream/') and request.headers.get(CLIENT_HEADER) != '1':
         return JSONResponse(status_code=403, content={'detail': '缺少 Oasis 用戶端標頭'})
 
+    # This machine is the backend's owner and is always in: the code exists only
+    # to let *other* devices reach it. Resolved once here — /api/health reports it
+    # back, and the local-only endpoints below re-use it.
+    local = auth.is_local_request(request)
+    code_set = auth.has_code()
+    authorized = local
+
+    if not local and code_set:
+        # <video src> cannot set headers, so streaming accepts the code as a query
+        # parameter. Everything else must use Authorization: Bearer.
+        presented = auth.extract_code(request)
+        if presented is None and path.startswith('/api/stream/'):
+            presented = request.query_params.get('token')
+        # Only a *wrong* code is a throttled failure. Presenting none is just an
+        # unpaired device — or a phone whose code was revoked, which polls
+        # /api/health in the background and must not be able to lock the owner out.
+        if presented is not None:
+            if auth.verify(presented):
+                auth.clear_failures(key)
+                authorized = True
+            else:
+                auth.register_failure(key)
+
+    request.state.local = local
+    request.state.authorized = authorized
+
     if path not in _OPEN_PATHS:
-        if not auth.has_code():
-            # Local-only mode: no code has been set, so this backend has no way to
-            # tell one remote caller from another and refuses them all. The user's
-            # own machine keeps working with no credential — which is the entire
-            # point, and why tunnelling an unconfigured backend leaks nothing.
-            if not auth.is_local_request(request):
+        if not authorized:
+            if not code_set:
+                # Remote access is off, so this backend has no way to tell one
+                # remote caller from another and refuses them all. Which is why
+                # tunnelling a backend whose switch is off leaks nothing.
                 return JSONResponse(
                     status_code=403,
                     content={
-                        'detail': '此後端尚未設定存取碼，無法從遠端存取',
+                        'detail': '此後端未開放遠端存取',
                         'code_required': True,
                     },
                 )
-        else:
-            # <video src> cannot set headers, so streaming accepts the session as a
-            # query parameter. Everything else must use Authorization: Bearer.
-            token = auth.extract_token(request)
-            if token is None and path.startswith('/api/stream/'):
-                token = request.query_params.get('token')
-            # Not a throttled failure: a session token is 256 bits of randomness
-            # and cannot be guessed, and counting it would let a device whose
-            # session was just revoked lock the owner out by merely polling.
-            if not auth.session_valid(token):
-                return JSONResponse(
-                    status_code=401,
-                    content={'detail': '需要存取碼', 'auth_required': True},
-                )
+            return JSONResponse(
+                status_code=401,
+                content={'detail': '需要存取碼', 'auth_required': True},
+            )
 
-        if _is_local_only(path) and not auth.is_local_request(request):
+        if _is_local_only(path) and not local:
             return JSONResponse(status_code=403, content={'detail': '此操作僅限本機執行'})
 
     return await call_next(request)
@@ -157,11 +172,11 @@ async def require_auth(request: Request, call_next):
 def _init_db():
     """Ensure the SQLite database and tables exist (safe to call repeatedly)."""
     db_setup.create_tables()
-    if auth.has_code():
-        print('🔐 已設定存取碼：其他裝置需輸入存取碼才能連線。')
-    else:
-        print('🔓 尚未設定存取碼：僅限本機使用，所有遠端連線一律拒絕。')
-        print('   若要用手機看片，請在「設定 → 遠端存取」設定存取碼。')
+    # The console is the only place the code is ever shown, so print it on every
+    # start: that is where the user goes to read it off.
+    auth.print_code()
+    if not auth.has_code():
+        print('   若要用手機看片，請在「設定 → 遠端存取」開啟遠端存取。')
     _resume_pending_downloads()
     asyncio.create_task(_bg_check_analyses())
 
@@ -227,106 +242,83 @@ class LoginRequest(BaseModel):
     code: str
 
 
-class SetCodeRequest(BaseModel):
-    code: str
-    # Required once a code already exists — proving you know the current one is
-    # what stops someone at an unlocked, logged-in browser from silently taking
-    # the backend over.
-    current: str | None = None
-
-
-class ClearCodeRequest(BaseModel):
-    current: str
-
-
 @app.get('/api/health')
 def health(request: Request):
-    """Liveness, plus everything the client needs to know about authentication.
+    """Liveness, plus everything the client needs to know about access.
 
-    Unauthenticated by design — it is the first call the frontend makes, before it
-    knows whether it has a valid session or whether the backend even wants one.
+    Open by design — it is the first call the frontend makes, before it knows
+    whether it holds a code the backend still honours, or whether the backend
+    wants one at all. The three flags are resolved by the auth middleware.
 
-      code_set      an access code has been set, so remote devices are allowed in
-                    (with the code). False means local-only mode.
+      code_set      remote access is on, so other devices may pair (with the code).
       authenticated this caller may use the API right now.
-      local         this caller is on the backend's own machine, so it may manage
-                    the access code and use the desktop-touching endpoints.
+      local         this caller is on the backend's own machine, so it is trusted
+                    unconditionally and may flip the switch.
     """
-    local = auth.is_local_request(request)
-    code_set = auth.has_code()
     return {
         'status': 'ok',
-        'code_set': code_set,
-        'authenticated': (
-            auth.session_valid(auth.extract_token(request)) if code_set else local
-        ),
-        'local': local,
+        'code_set': auth.has_code(),
+        'authenticated': request.state.authorized,
+        'local': request.state.local,
     }
 
 
 @app.post('/api/auth/login')
 def auth_login(payload: LoginRequest, request: Request):
-    """Exchange the access code for a session token.
+    """Check an access code and hand it back in canonical form.
 
-    The only endpoint that ever sees the code, and the only one whose failures are
-    throttled — everything else presents the session token it hands back, so the
-    user's password never ends up in a URL, a log, or a <video> src.
+    The code *is* the credential — there is no session to exchange it for — so
+    this endpoint exists purely to tell a device "yes, that code is right" before
+    it stores it, and to throttle a device that keeps guessing wrong.
     """
     key = auth.client_key(request)
     if not auth.has_code():
-        raise HTTPException(status_code=400, detail='此後端尚未設定存取碼')
-    if not auth.verify_code(payload.code):
+        raise HTTPException(status_code=400, detail='此後端未開放遠端存取')
+    if not auth.verify(payload.code):
         auth.register_failure(key)
         raise HTTPException(status_code=401, detail='存取碼錯誤')
     auth.clear_failures(key)
-    return {'token': auth.create_session()}
+    return {'token': auth.normalize(payload.code)}
 
 
-@app.post('/api/auth/code')
-def auth_set_code(payload: SetCodeRequest):
-    """Set or change the access code (local machine only; see _LOCAL_ONLY_PATHS).
+@app.post('/api/auth/remote')
+def auth_enable_remote():
+    """Turn remote access on and mint a fresh code (local machine only).
 
-    Changing it drops every existing session, which is how a user cuts off a
-    device or a leaked pairing QR. The caller gets a fresh session straight back,
-    so the browser that just changed the code stays logged in.
+    The code goes to the console, never to the caller: the web UI never displays
+    it, so a settings page left open on a shared screen gives nothing away. Always
+    a *new* code, so flipping the switch off and on is how a user rotates it and
+    cuts off every device that had the old one.
     """
-    if auth.has_code():
-        if not payload.current or not auth.verify_code(payload.current):
-            raise HTTPException(status_code=401, detail='目前的存取碼不正確')
-    try:
-        auth.set_code(payload.code)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {'token': auth.create_session()}
+    auth.enable()
+    auth.print_code()
+    return {'code_set': True}
 
 
-@app.delete('/api/auth/code')
-def auth_clear_code(payload: ClearCodeRequest):
-    """Remove the access code, returning the backend to local-only mode.
+@app.delete('/api/auth/remote')
+def auth_disable_remote():
+    """Turn remote access off (local machine only).
 
     Not a way to make the backend *less* safe: with no code, every non-local
     request is refused outright. It only gives up the ability to use it remotely.
     """
-    if not auth.has_code():
-        return {'status': 'cleared'}
-    if not auth.verify_code(payload.current):
-        raise HTTPException(status_code=401, detail='目前的存取碼不正確')
-    auth.clear_code()
-    return {'status': 'cleared'}
+    auth.disable()
+    print('🔓 遠端存取已關閉：僅限本機使用，所有遠端連線一律拒絕。')
+    return {'code_set': False}
 
 
-@app.post('/api/auth/pair')
-def auth_pair():
-    """Mint a session token for another device — what the pairing QR carries.
+@app.post('/api/auth/reveal')
+def auth_reveal():
+    """Print the current code to the backend's console again (local machine only).
 
-    Local-only, so only the owner's own screen can produce one. Handing out a
-    session rather than the code itself means the password never leaves this
-    machine, and a scanned phone can be cut off (by changing the code) without the
-    owner ever having told it what the code was.
+    What a user who forgot it clicks. It is answered on the console rather than in
+    the response body on purpose — the browser is never told the code, so this
+    stays useless to anyone who isn't sitting at the machine.
     """
     if not auth.has_code():
-        raise HTTPException(status_code=400, detail='請先設定存取碼才能配對其他裝置')
-    return {'token': auth.create_session()}
+        raise HTTPException(status_code=400, detail='此後端未開放遠端存取')
+    auth.print_code()
+    return {'status': 'printed'}
 
 
 @app.get('/api/update/check')
