@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
 import QRCode from "qrcode";
@@ -422,11 +422,12 @@ function UpdateDiagnostics({
  * note with a manual retry rather than breaking the settings page.
  */
 function UpdateSection() {
+  const { status } = useBackend();
   // Keep the last result across re-checks: the current version is the build's
   // own and never changes, so it stays on screen while re-checking instead of
   // flickering to a placeholder — the button already signals the busy state.
   const [info, setInfo] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(true);
+  const [checking, setChecking] = useState(status === "up");
   const [error, setError] = useState<string | null>(null);
   // Set once an update is confirmed applied (the relaunched backend reports the
   // new version), e.g. "已更新到 v0.2.3".
@@ -461,19 +462,23 @@ function UpdateSection() {
     }
   }
 
-  async function runCheck(signal?: AbortSignal) {
-    setChecking(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      setInfo(await checkForUpdate(signal));
-    } catch {
-      if (signal?.aborted) return;
-      setError("無法連線到後端，請確認 OASIS 後端正在執行後再試。");
-    } finally {
-      if (!signal?.aborted) setChecking(false);
-    }
-  }
+  const runCheck = useCallback(
+    async (signal?: AbortSignal) => {
+      if (status !== "up") return;
+      setChecking(true);
+      setError(null);
+      setSuccess(null);
+      try {
+        setInfo(await checkForUpdate(signal));
+      } catch {
+        if (signal?.aborted) return;
+        setError("無法連線到後端，請確認 OASIS 後端正在執行後再試。");
+      } finally {
+        if (!signal?.aborted) setChecking(false);
+      }
+    },
+    [status],
+  );
 
   // Wait for the backend to go down and come back up after it relaunches
   // itself, then re-check so the UI reflects the freshly installed version.
@@ -594,10 +599,14 @@ function UpdateSection() {
   }
 
   useEffect(() => {
+    if (status !== "up") {
+      setChecking(false);
+      return;
+    }
     const controller = new AbortController();
     runCheck(controller.signal);
     return () => controller.abort();
-  }, []);
+  }, [status, runCheck]);
 
   return (
     <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">
