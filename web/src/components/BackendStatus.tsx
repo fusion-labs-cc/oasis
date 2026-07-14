@@ -48,7 +48,7 @@ export default function BackendStatus() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-xl border border-border-hairline bg-surface-highest p-4 text-sm shadow-2xl">
+        <div className="fixed inset-x-4 top-16 z-50 rounded-xl border border-border-hairline bg-surface-highest p-4 text-sm shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-80">
           {status === "up" && (
             <div className="mb-3 border-b border-border-hairline pb-3">
               <button

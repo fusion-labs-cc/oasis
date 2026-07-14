@@ -513,8 +513,8 @@ export default function VideoDetailPage() {
 
   if (loading && !video) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-8 py-6 animate-pulse">
-        <div className="mx-auto aspect-video w-full max-w-[calc((100vh-8rem)*16/9)] bg-surface-elevated rounded-2xl" />
+      <main className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 md:px-8 md:py-6 animate-pulse">
+        <div className="mx-auto aspect-video w-full max-w-[calc((100dvh-8rem)*16/9)] bg-surface-elevated rounded-2xl" />
         <div className="mt-8 rounded-2xl border border-border-hairline bg-surface-elevated p-6 space-y-6">
           <div className="flex justify-between items-center pb-4 border-b border-border-hairline">
             <div className="h-6 w-32 bg-surface-highest rounded" />
@@ -531,7 +531,7 @@ export default function VideoDetailPage() {
 
   if (error || !video) {
     return (
-      <main className="mx-auto w-full max-w-7xl px-8 py-6">
+      <main className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 md:px-8 md:py-6">
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-5 text-sm text-red-400 font-sans leading-relaxed">
           <div className="flex items-center gap-2 font-semibold mb-1">
             <span>✕</span>
@@ -544,7 +544,7 @@ export default function VideoDetailPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-7xl px-8 py-6">
+    <main className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 md:px-8 md:py-6">
       {/* Video Player */}
       {video.video_path && video.local_file_exists ? (
         <div
@@ -560,7 +560,7 @@ export default function VideoDetailPage() {
               controls
               autoPlay={false}
               onPlay={handlePlay}
-              className="mx-auto w-full aspect-video max-h-[calc(100vh-8rem)] max-w-[calc((100vh-8rem)*16/9)] outline-none"
+              className="mx-auto w-full aspect-video max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] outline-none"
               src={streamUrl(video.id!)}
               poster={video.cover || undefined}
             >
@@ -571,7 +571,7 @@ export default function VideoDetailPage() {
       ) : null}
 
       {(!video.video_path || !video.local_file_exists) && (
-        <div className="relative mx-auto aspect-video w-full max-h-[calc(100vh-8rem)] max-w-[calc((100vh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
+        <div className="relative mx-auto aspect-video w-full max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
           {video.cover && (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -597,7 +597,7 @@ export default function VideoDetailPage() {
             <div className="flex flex-wrap items-center justify-center gap-3">
               {isDownloading ? (
                 <div className="flex flex-col items-center gap-3">
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center justify-center gap-3">
                     <span className="inline-flex items-center gap-2 rounded-xl bg-accent/10 px-5 py-3 text-sm font-bold text-accent border border-accent/20 animate-pulse">
                       <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
                       {video.download_queued
@@ -646,7 +646,7 @@ export default function VideoDetailPage() {
       )}
 
       {/* Video Info */}
-      <div className="mt-8 rounded-2xl border border-border-hairline bg-surface-elevated p-6 shadow-xl">
+      <div className="mt-8 rounded-2xl border border-border-hairline bg-surface-elevated p-4 sm:p-6 shadow-xl">
         {editingDetails ? (
           <div className="border-b border-border-hairline pb-5 mb-4 space-y-4">
             <div className="flex items-center justify-between gap-3">
@@ -733,8 +733,8 @@ export default function VideoDetailPage() {
         ) : (
           <>
         {/* Code + Actress row */}
-        <div className="flex items-center justify-between gap-4 border-b border-border-hairline pb-4 mb-4">
-          <h1 className="font-mono text-2xl font-black text-text-primary tracking-tight flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border-hairline pb-4 mb-4">
+          <h1 className="font-mono text-xl sm:text-2xl font-black text-text-primary tracking-tight flex items-center gap-2">
             {video.code}
             <button
               type="button"
@@ -778,7 +778,7 @@ export default function VideoDetailPage() {
 
         {/* Actions */}
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border-hairline pt-6">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {video.video_path && video.local_file_exists && (
               <button
                 onClick={handleOpenInPlayer}

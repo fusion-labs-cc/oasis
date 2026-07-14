@@ -259,7 +259,7 @@ export default function AwakeMode() {
       </header>
 
       {/* Main */}
-      <main className="-mt-16 flex flex-grow flex-col items-center justify-center px-4">
+      <main className="-mt-8 sm:-mt-16 flex flex-grow flex-col items-center justify-center px-4">
         {/* Logo / AI greeting */}
         <div
           className="relative mb-8 flex h-28 items-center justify-center select-none"
@@ -274,7 +274,7 @@ export default function AwakeMode() {
             }`}
           >
             <svg
-              className="h-24 w-72"
+              className="h-16 w-48 sm:h-24 sm:w-72"
               viewBox="0 0 272 92"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"

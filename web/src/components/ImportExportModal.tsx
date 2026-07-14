@@ -193,7 +193,7 @@ export default function ImportExportModal({
       onMouseDown={handleBackdropMouseDown}
       onClick={handleBackdropClick}
       onClose={onClose}
-      className="fixed left-1/2 top-[7vh] -translate-x-1/2 w-full max-w-xl max-h-[86vh] overflow-y-auto rounded-2xl border border-border-hairline bg-surface-elevated p-6 shadow-2xl outline-none"
+      className="fixed left-1/2 top-[7vh] -translate-x-1/2 w-[calc(100%-2rem)] max-w-xl max-h-[86vh] overflow-y-auto rounded-2xl border border-border-hairline bg-surface-elevated p-6 shadow-2xl outline-none"
     >
       <div className="flex items-center justify-between border-b border-border-hairline pb-4 mb-4">
         <div>

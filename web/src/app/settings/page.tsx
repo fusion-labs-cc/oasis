@@ -113,13 +113,13 @@ function Field({
           </p>
         )}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="w-full shrink-0 sm:w-auto">{children}</div>
     </div>
   );
 }
 
 const inputClass =
-  "w-64 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50";
+  "w-full sm:w-64 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50";
 
 /**
  * Remote access — one switch, and the code it mints.
@@ -696,24 +696,24 @@ function UpdateSection() {
             : "檢查是否有新的發行版本。"
         }
       >
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex w-full flex-col items-start gap-2 sm:w-auto sm:items-end">
           {error && (
-            <p className="max-w-[16rem] text-right text-xs text-amber-500">
+            <p className="max-w-[16rem] text-left text-xs text-amber-500 sm:text-right">
               {error}
             </p>
           )}
           {success && (
-            <p className="max-w-[16rem] text-right text-xs text-emerald-500">
+            <p className="max-w-[16rem] text-left text-xs text-emerald-500 sm:text-right">
               {success}
             </p>
           )}
           {info?.error && (
-            <p className="max-w-[16rem] text-right text-xs text-amber-500">
+            <p className="max-w-[16rem] text-left text-xs text-amber-500 sm:text-right">
               {info.error}
             </p>
           )}
           {phase ? (
-            <div className="flex w-[16rem] flex-col items-end gap-1.5">
+            <div className="flex w-full max-w-[16rem] flex-col items-start gap-1.5 sm:items-end">
               <p className="text-xs text-text-tertiary">
                 {phase === "downloading"
                   ? percent >= 0
@@ -891,7 +891,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-8 py-10">
+    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6 md:px-8 md:py-10">
       <div className="mb-8">
         <Link
           href="/"
@@ -936,7 +936,7 @@ export default function SettingsPage() {
             onChange={(e) => update("nickname", e.target.value)}
             maxLength={40}
             placeholder="輸入你的暱稱"
-            className="w-56 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50"
+            className="w-full sm:w-56 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50"
           />
         </Field>
       </section>

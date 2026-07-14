@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import SiteChrome from "@/components/SiteChrome";
 import "./globals.css";
@@ -26,6 +26,11 @@ export const metadata: Metadata = {
   description: "歡迎來到綠洲 — 唯一的極限，是你的想像力。",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -51,7 +56,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full min-w-[1024px] flex flex-col bg-background text-foreground">
+      <body className="min-h-full flex flex-col bg-background text-foreground">
         <SiteChrome>{children}</SiteChrome>
       </body>
     </html>

@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { computeFacets, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, VideoRecord } from "@/lib/api";
+import { computeFacets, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
@@ -22,6 +22,8 @@ export default function Home() {
   const [selectedActress, setSelectedActress] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [match, setMatch] = useState<"all" | "any">("all");
+  // Mobile-only collapsible for the filter panel — the sidebar is xl-only.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Multi-select. Selection is keyed by video id and lives *above* the filter,
   // so a video stays selected even after the filter hides it from the grid —
@@ -244,7 +246,7 @@ export default function Home() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1680px] justify-between gap-8 px-8 py-10">
+    <div className="mx-auto flex w-full max-w-[1680px] justify-between gap-8 px-4 py-6 sm:px-6 md:px-8 md:py-10">
       <main className="flex-1 min-w-0">
         {/* Dynamic Hero Section */}
         {lastWatched ? (
@@ -415,6 +417,25 @@ export default function Home() {
                   清除篩選
                 </button>
               )}
+              {/* Mobile filter toggle — the sidebar only exists at xl and up */}
+              {facets.actresses.length + facets.tags.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen((prev) => !prev)}
+                  className={`xl:hidden rounded-lg border px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+                    filtersOpen || hasFilters
+                      ? "border-accent/40 bg-accent/10 text-accent"
+                      : "border-border-hairline bg-surface-elevated text-text-secondary hover:bg-surface-highest hover:text-text-primary"
+                  }`}
+                >
+                  篩選
+                  {selectedTags.length + (selectedActress ? 1 : 0) > 0 && (
+                    <span className="ml-1 font-mono font-bold">
+                      {selectedTags.length + (selectedActress ? 1 : 0)}
+                    </span>
+                  )}
+                </button>
+              )}
               {allVideos.length > 0 && (
                 <button
                   type="button"
@@ -430,6 +451,21 @@ export default function Home() {
               )}
             </div>
           </div>
+
+          {/* Collapsible filter panel for below-xl screens */}
+          {filtersOpen && (
+            <div className="mb-4 space-y-4 xl:hidden">
+              <FilterPanel
+                facets={facets}
+                selectedActress={selectedActress}
+                toggleActress={toggleActress}
+                selectedTags={selectedTags}
+                toggleTag={toggleTag}
+                match={match}
+                setMatch={setMatch}
+              />
+            </div>
+          )}
 
           {/* Selection toolbar — appears in select mode. Selection is kept by id
               above the filter, so counts include videos hidden by the filter. */}
@@ -506,8 +542,8 @@ export default function Home() {
           )}
 
           {loadingList ? (
-            /* Animated Skeletons matching the 3/4-column structure */
-            <div className="grid grid-cols-3 2xl:grid-cols-4 gap-6">
+            /* Animated Skeletons matching the responsive grid structure */
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, i) => (
                 <div
                   key={i}
@@ -557,7 +593,7 @@ export default function Home() {
               )}
             </div>
           ) : (
-            <ul className="grid grid-cols-3 2xl:grid-cols-4 gap-6">
+            <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-4">
               {videos.map((v) => (
                 <VideoCard
                   key={v.id ?? v.code}
@@ -574,102 +610,18 @@ export default function Home() {
         </section>
       </main>
 
-      {/* Filter Sidebar */}
+      {/* Filter Sidebar (xl and up; smaller screens use the collapsible above the grid) */}
       <aside className="hidden w-64 shrink-0 xl:block">
         <div className="sticky top-24 space-y-6">
-          {/* Actress Filters */}
-          {facets.actresses.length > 0 && (
-            <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
-              <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
-                依女優篩選
-              </span>
-              <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
-                {facets.actresses.map((a) => {
-                  const active = selectedActress === a.name;
-                  return (
-                    <button
-                      key={a.name}
-                      type="button"
-                      onClick={() => toggleActress(a.name)}
-                      className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition font-semibold cursor-pointer ${
-                        active
-                          ? "bg-accent text-neutral-950 font-bold"
-                          : "text-text-secondary hover:bg-surface-highest hover:text-text-primary"
-                      }`}
-                    >
-                      <span className="truncate">{a.name}</span>
-                      <span
-                        className={`font-mono text-[10px] ${
-                          active
-                            ? "text-neutral-950/70"
-                            : "text-text-tertiary"
-                        }`}
-                      >
-                        {a.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Tag Filters */}
-          {facets.tags.length > 0 && (
-            <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
-              <div className="mb-3 flex flex-col gap-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
-                  依標籤篩選
-                </span>
-                {selectedTags.length > 1 && (
-                  <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
-                    {(["all", "any"] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setMatch(m)}
-                        className={`px-2 py-1 flex-1 text-center font-medium transition cursor-pointer ${
-                          match === m
-                            ? "bg-accent text-neutral-950 font-bold"
-                            : "text-text-secondary hover:bg-surface-highest"
-                        }`}
-                      >
-                        {m === "all" ? "全部符合" : "任一符合"}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="flex max-h-96 flex-wrap gap-1.5 overflow-y-auto pr-1">
-                {facets.tags.map((t) => {
-                  const active = selectedTags.includes(t.name);
-                  return (
-                    <button
-                      key={t.name}
-                      type="button"
-                      onClick={() => toggleTag(t.name)}
-                      className={`rounded-full px-2.5 py-1 text-xs transition cursor-pointer border ${
-                        active
-                          ? "bg-accent text-neutral-950 border-accent font-bold"
-                          : "bg-surface-highest/60 text-text-secondary border-border-hairline hover:border-accent/30 hover:text-text-primary"
-                      }`}
-                    >
-                      {t.name}
-                      <span
-                        className={`ml-1 font-mono text-[10px] ${
-                          active
-                            ? "text-neutral-950/70"
-                            : "text-text-tertiary"
-                        }`}
-                      >
-                        {t.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <FilterPanel
+            facets={facets}
+            selectedActress={selectedActress}
+            toggleActress={toggleActress}
+            selectedTags={selectedTags}
+            toggleTag={toggleTag}
+            match={match}
+            setMatch={setMatch}
+          />
         </div>
       </aside>
 
@@ -684,6 +636,124 @@ export default function Home() {
         onClose={() => setExportSelectionOpen(false)}
       />
     </div>
+  );
+}
+
+// The actress/tag facet panels, shared between the xl sidebar and the
+// below-xl collapsible block above the grid.
+function FilterPanel({
+  facets,
+  selectedActress,
+  toggleActress,
+  selectedTags,
+  toggleTag,
+  match,
+  setMatch,
+}: {
+  facets: Facets;
+  selectedActress: string | null;
+  toggleActress: (name: string) => void;
+  selectedTags: string[];
+  toggleTag: (tag: string) => void;
+  match: "all" | "any";
+  setMatch: (m: "all" | "any") => void;
+}) {
+  return (
+    <>
+      {/* Actress Filters */}
+      {facets.actresses.length > 0 && (
+        <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
+            依女優篩選
+          </span>
+          <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+            {facets.actresses.map((a) => {
+              const active = selectedActress === a.name;
+              return (
+                <button
+                  key={a.name}
+                  type="button"
+                  onClick={() => toggleActress(a.name)}
+                  className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition font-semibold cursor-pointer ${
+                    active
+                      ? "bg-accent text-neutral-950 font-bold"
+                      : "text-text-secondary hover:bg-surface-highest hover:text-text-primary"
+                  }`}
+                >
+                  <span className="truncate">{a.name}</span>
+                  <span
+                    className={`font-mono text-[10px] ${
+                      active
+                        ? "text-neutral-950/70"
+                        : "text-text-tertiary"
+                    }`}
+                  >
+                    {a.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Tag Filters */}
+      {facets.tags.length > 0 && (
+        <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
+          <div className="mb-3 flex flex-col gap-2">
+            <span className="text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
+              依標籤篩選
+            </span>
+            {selectedTags.length > 1 && (
+              <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
+                {(["all", "any"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMatch(m)}
+                    className={`px-2 py-1 flex-1 text-center font-medium transition cursor-pointer ${
+                      match === m
+                        ? "bg-accent text-neutral-950 font-bold"
+                        : "text-text-secondary hover:bg-surface-highest"
+                    }`}
+                  >
+                    {m === "all" ? "全部符合" : "任一符合"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex max-h-96 flex-wrap gap-1.5 overflow-y-auto pr-1">
+            {facets.tags.map((t) => {
+              const active = selectedTags.includes(t.name);
+              return (
+                <button
+                  key={t.name}
+                  type="button"
+                  onClick={() => toggleTag(t.name)}
+                  className={`rounded-full px-2.5 py-1 text-xs transition cursor-pointer border ${
+                    active
+                      ? "bg-accent text-neutral-950 border-accent font-bold"
+                      : "bg-surface-highest/60 text-text-secondary border-border-hairline hover:border-accent/30 hover:text-text-primary"
+                  }`}
+                >
+                  {t.name}
+                  <span
+                    className={`ml-1 font-mono text-[10px] ${
+                      active
+                        ? "text-neutral-950/70"
+                        : "text-text-tertiary"
+                    }`}
+                  >
+                    {t.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

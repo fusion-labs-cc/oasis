@@ -16,7 +16,7 @@ const LINKS = [
 
 export default function LegalLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="legal-page flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col">
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 py-14 sm:py-20">
         <Link
           href="/"
