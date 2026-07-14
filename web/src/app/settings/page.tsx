@@ -5,16 +5,22 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toast";
+import QRCode from "qrcode";
+import { useBackend } from "@/context/BackendContext";
 import {
   applyUpdate,
   checkForUpdate,
   checkHealth,
+  clearAccessCode,
+  createPairingToken,
   fetchUpdateLogs,
   fetchUpdateProgress,
+  setAccessCode,
   UpdateInfo,
   UpdateLogs,
   UpdateProgress,
 } from "@/lib/api";
+import { getBackendUrl, setSessionToken } from "@/lib/backend";
 import {
   defaultSettings,
   formatHotkey,
@@ -109,6 +115,206 @@ function Field({
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  );
+}
+
+const inputClass =
+  "w-56 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50";
+
+/**
+ * Remote access — the access code that lets a phone reach this backend safely.
+ *
+ * Without a code the backend is in local-only mode: it works with no credential
+ * from this machine and refuses every non-local caller outright, so tunnelling an
+ * unconfigured backend (ngrok & co.) leaks nothing. Setting a code is what opens
+ * remote access, and from then on *everyone* authenticates, this browser included.
+ *
+ * All of it is local-only, which is not just prudence: if a remote device could
+ * reach the setup form, whoever found an unclaimed tunnel URL could set a code
+ * first and lock the owner out of their own machine.
+ */
+function RemoteAccessSection() {
+  const toast = useToast();
+  const { codeSet, local, ping } = useBackend();
+
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Pairing QR, minted on demand. It carries a *session token*, never the code —
+  // so the password never leaves this screen, and a scanned device can be cut off
+  // later (by changing the code, which drops every session) without changing it.
+  const [qr, setQr] = useState<string | null>(null);
+
+  async function save() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const token = await setAccessCode(next, codeSet ? current : undefined);
+      setSessionToken(token);
+      setCurrent("");
+      setNext("");
+      setQr(null);
+      await ping();
+      toast(codeSet ? "已更新存取碼，其他裝置需重新登入" : "已設定存取碼", {
+        type: "success",
+      });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "設定失敗", { type: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (busy) return;
+    if (!confirm("移除存取碼後，所有其他裝置都會立即斷線，這個後端將只能從本機使用。確定嗎？"))
+      return;
+    setBusy(true);
+    try {
+      await clearAccessCode(current);
+      setSessionToken("");
+      setCurrent("");
+      setQr(null);
+      await ping();
+      toast("已移除存取碼，現在僅限本機使用", { type: "success" });
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "移除失敗", { type: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showQr() {
+    setBusy(true);
+    try {
+      const token = await createPairingToken();
+      // The fragment never reaches a server, and the gate wipes it from the
+      // address bar as soon as it reads it.
+      const payload = btoa(JSON.stringify({ u: getBackendUrl(), t: token }))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+      const link = `${window.location.origin}/#oasis-pair=${payload}`;
+      setQr(await QRCode.toDataURL(link, { width: 240, margin: 1 }));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "無法產生配對碼", { type: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">
+      <div className="pt-6">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
+          遠端存取
+        </span>
+      </div>
+
+      {!local ? (
+        <Field
+          title="存取碼"
+          description="只有執行綠洲的那台電腦能管理存取碼。請在該電腦上開啟此頁面來變更或移除。"
+        >
+          <span className="text-xs text-text-tertiary">僅限本機管理</span>
+        </Field>
+      ) : !codeSet ? (
+        <Field
+          title="設定存取碼"
+          description="目前僅限本機使用：任何來自其他裝置的連線都會被拒絕。設定存取碼後，才能用手機等裝置連進來（例如透過 ngrok 之類的通道）。存取碼只會以雜湊形式保存，不會明文存在你的電腦上。"
+        >
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              placeholder="至少 6 個字元"
+              autoComplete="new-password"
+              className={inputClass}
+            />
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy || next.length < 6}
+              className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+            >
+              設定
+            </button>
+          </div>
+        </Field>
+      ) : (
+        <>
+          <Field
+            title="配對其他裝置"
+            description="用手機掃描這個 QR code 即可直接進入，不必手動輸入存取碼。QR code 內含的是一組可撤銷的連線憑證，不是你的存取碼本身——變更存取碼會讓它連同所有已連線的裝置一起失效。"
+          >
+            <button
+              type="button"
+              onClick={showQr}
+              disabled={busy}
+              className="rounded-lg border border-border-hairline px-3 py-2 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest disabled:opacity-40 cursor-pointer"
+            >
+              {qr ? "重新產生" : "顯示 QR code"}
+            </button>
+          </Field>
+          {qr && (
+            <div className="flex flex-col items-center gap-2 border-b border-border-hairline py-6">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qr} alt="配對 QR code" className="rounded-lg bg-white p-2" width={240} height={240} />
+              <p className="text-center text-xs text-text-tertiary">
+                掃描後手機會先詢問要連線的入口座標，確認無誤再進入。
+              </p>
+            </div>
+          )}
+          <Field
+            title="變更存取碼"
+            description="需要輸入目前的存取碼。變更後所有其他裝置都會立即斷線，必須重新登入。"
+          >
+            <div className="flex flex-col items-end gap-2">
+              <input
+                type="password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                placeholder="目前的存取碼"
+                autoComplete="current-password"
+                className={inputClass}
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  value={next}
+                  onChange={(e) => setNext(e.target.value)}
+                  placeholder="新的存取碼"
+                  autoComplete="new-password"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={busy || !current || next.length < 6}
+                  className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+                >
+                  更新
+                </button>
+              </div>
+            </div>
+          </Field>
+          <Field
+            title="移除存取碼"
+            description="回到僅限本機使用的狀態：所有遠端連線一律拒絕。需要輸入目前的存取碼。"
+          >
+            <button
+              type="button"
+              onClick={remove}
+              disabled={busy || !current}
+              className="rounded-lg border border-red-500/30 px-3 py-2 text-xs font-semibold text-red-400 transition hover:bg-red-500/10 disabled:opacity-40 cursor-pointer"
+            >
+              移除
+            </button>
+          </Field>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -308,7 +514,7 @@ function UpdateSection() {
     // *new* healthy answer (otherwise we'd immediately see the old one as "up").
     await new Promise((r) => setTimeout(r, 4000));
     while (Date.now() < deadline) {
-      if (await checkHealth()) return true;
+      if ((await checkHealth()).ok) return true;
       await new Promise((r) => setTimeout(r, 2000));
     }
     return false;
@@ -749,6 +955,9 @@ export default function SettingsPage() {
           />
         </Field>
       </section>
+
+      {/* Remote access */}
+      <RemoteAccessSection />
 
       {/* About & Updates */}
       <UpdateSection />

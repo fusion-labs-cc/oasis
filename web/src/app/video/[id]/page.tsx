@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, backendUrl } from "@/lib/api";
+import { downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
@@ -561,7 +561,7 @@ export default function VideoDetailPage() {
               autoPlay={false}
               onPlay={handlePlay}
               className="mx-auto w-full aspect-video max-h-[calc(100vh-8rem)] max-w-[calc((100vh-8rem)*16/9)] outline-none"
-              src={backendUrl(`/api/stream/${video.id}`)}
+              src={streamUrl(video.id!)}
               poster={video.cover || undefined}
             >
               您的瀏覽器不支援影片播放。

@@ -1,7 +1,7 @@
 // Shared types + client helpers. The browser calls the user's local FastAPI
 // backend directly (see getBackendUrl); there is no server-side proxy.
 
-import { getBackendUrl } from "./backend";
+import { getBackendUrl, getSessionToken } from "./backend";
 
 export interface VideoRecord {
   id?: number;
@@ -50,12 +50,32 @@ const CLIENT_HEADER: Record<string, string> = {
   "ngrok-skip-browser-warning": "true",
 };
 
-// fetch() against the local backend with the client header always attached.
+// fetch() against the local backend with the client header and the session token
+// always attached. The header above is only a CSRF guard — it is public and
+// fixed, so it proves nothing about *who* is calling and is worthless against
+// anything that isn't a browser (a plain `curl` ignores CORS entirely). The
+// bearer session is the actual authentication, and it is what makes it safe to
+// put the backend behind a tunnel so a phone can reach it.
 export function backendFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = getSessionToken();
   return fetch(backendUrl(path), {
     ...init,
-    headers: { ...CLIENT_HEADER, ...(init.headers ?? {}) },
+    headers: {
+      ...CLIENT_HEADER,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
+    },
   });
+}
+
+// <video src> can send neither a header nor a cookie, so streaming carries the
+// session in the query string instead (the backend accepts it on /api/stream
+// only). This is a session token, never the access code — which is precisely why
+// the code is exchanged for one rather than sent on every call.
+export function streamUrl(videoId: number): string {
+  const token = getSessionToken();
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  return backendUrl(`/api/stream/${videoId}${query}`);
 }
 
 // Allow only http(s) URLs into an anchor href. A video's `url` is user/scrape
@@ -78,17 +98,87 @@ export function safeExternalHref(url: string | null | undefined): string | undef
 // state indefinitely.
 export const HEALTH_TIMEOUT_MS = 3000;
 
-// Ping the backend; true when reachable and healthy.
-export async function checkHealth(signal?: AbortSignal): Promise<boolean> {
+export interface HealthResult {
+  // Backend reachable at all.
+  ok: boolean;
+  // An access code has been set, so this backend accepts remote devices (with
+  // the code). False = local-only mode: it refuses every non-local caller.
+  codeSet: boolean;
+  // We may use the API right now — either we hold a valid session, or no code is
+  // set and we are local.
+  authenticated: boolean;
+  // This browser is on the backend's own machine, so it may manage the access
+  // code. False for a phone coming in over a tunnel.
+  local: boolean;
+}
+
+// Ping the backend, and learn where we stand with it.
+export async function checkHealth(signal?: AbortSignal): Promise<HealthResult> {
   try {
     const res = await backendFetch("/api/health", {
       cache: "no-store",
       signal: signal ?? AbortSignal.timeout(HEALTH_TIMEOUT_MS),
     });
-    return res.ok;
+    if (!res.ok) return { ok: false, codeSet: false, authenticated: false, local: false };
+    const data = await res.json().catch(() => ({}));
+    return {
+      ok: true,
+      // A backend older than access codes answers without these fields. Absent
+      // `authenticated` must read as "no auth needed", or this frontend (which
+      // deploys independently of the backend a user has installed) would lock
+      // every un-updated install out of its own catalog.
+      authenticated: data.authenticated !== false,
+      codeSet: data.code_set === true,
+      local: data.local === true,
+    };
   } catch {
-    return false;
+    return { ok: false, codeSet: false, authenticated: false, local: false };
   }
+}
+
+// Exchange the access code for a session token. The only call that ever carries
+// the code; everything after this presents the session it returns.
+export async function login(code: string): Promise<string> {
+  const res = await backendFetch("/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return data.token as string;
+}
+
+// Set or change the access code (local machine only). `current` is required once
+// one exists. Returns a fresh session, since changing the code drops all others.
+export async function setAccessCode(code: string, current?: string): Promise<string> {
+  const res = await backendFetch("/api/auth/code", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, current: current ?? null }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return data.token as string;
+}
+
+// Remove the access code, returning the backend to local-only mode (local only).
+export async function clearAccessCode(current: string): Promise<void> {
+  const res = await backendFetch("/api/auth/code", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+// Mint a session token for another device — what the pairing QR carries, so the
+// phone is logged in without the access code ever leaving this screen.
+export async function createPairingToken(): Promise<string> {
+  const res = await backendFetch("/api/auth/pair", { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return data.token as string;
 }
 
 export interface UpdateInfo {

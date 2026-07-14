@@ -40,12 +40,27 @@ Oasis is **not a hosted web app**. It is a public Next.js frontend (deployed to 
 
 > `web/README.md` is stale: it describes Next.js route handlers proxying to FastAPI. That is no longer true (see `web/src/lib/backend.ts` and `api.ts`). Trust the code.
 
-Because the page is HTTPS and the backend is plain HTTP on localhost (browsers exempt localhost from mixed-content blocking), two guards stand in for the usual same-origin protection:
+Because the page is HTTPS and the backend is plain HTTP on localhost (browsers exempt localhost from mixed-content blocking), three guards stand in for the usual same-origin protection. The first two are **CSRF** guards and bind *browsers only*; the third is **authentication** and is the one that holds when the backend is not on localhost at all:
 
 - **CORS allowlist** — `ALLOWED_ORIGINS` (default: `localhost:3000` + the deployed site).
 - **`X-Oasis-Client: 1` header** — required on every `/api/*` call by a middleware in `api.py`. It is a public, fixed value, not a secret: requiring a *custom* header forces a CORS preflight, which the backend only answers for allowed origins. That closes CSRF on side-effecting endpoints like `/api/videos/{id}/open` (which launches a local player). `/api/stream/*` is exempt, since `<video src>` cannot send custom headers.
+- **Access code** (`auth.py`) — the actual authentication. Neither guard above survives contact with a non-browser: `curl -H 'X-Oasis-Client: 1'` ignores CORS entirely, which is a total compromise the moment a user tunnels the backend (ngrok & co.) to watch from their phone.
 
-Any new `/api/*` endpoint inherits this automatically; any new frontend call must go through `backendFetch()` in `web/src/lib/api.ts`, never a bare `fetch`.
+Any new `/api/*` endpoint inherits all three automatically; any new frontend call must go through `backendFetch()` in `web/src/lib/api.ts`, never a bare `fetch`.
+
+The backend has **two modes**, and which one it is in depends solely on whether the user has set an access code:
+
+- **No code (the default) → local-only.** Requests from this machine need no credential at all — the double-click-and-go experience is untouched — and every non-local request is refused outright. An unconfigured backend therefore *cannot* be used remotely, so tunnelling one before setting a code leaks nothing.
+- **Code set → everyone authenticates, the owner's own browser included.** This is what opens remote access.
+
+The code is user-chosen, so it is never stored: `oasis.auth.json` (next to the DB) holds only its scrypt hash plus the SHA-256 digests of live sessions, so neither the file nor a leaked copy of it is a usable credential. A device sends the code exactly once, to `/api/auth/login`, and gets a random **session token** back; everything after that presents the session. That keeps the password out of URLs — `<video src>` can carry a credential only as a query param (`/api/stream/*?token=…`) — and makes revocation possible: changing the code drops every session, which is how a phone (or a leaked pairing QR) gets cut off.
+
+`is_local_request()` is only ever used to decide who may *manage* the code, never to hand out a secret — that is what makes it safe to rely on. It requires a loopback peer **and** no `X-Forwarded-*`/proxy header: both halves matter, because a tunnel agent runs on the user's own machine and so also connects from 127.0.0.1; what gives it away is the header it injects, which a client on the far side cannot strip. A raw TCP forward (`ssh -R`) adds no headers and is the known, accepted gap — but an attacker who exploits it still learns nothing, since there is no secret to be handed out and he still lacks the code.
+
+- **Setting the first code is local-only too**, and that is load-bearing: a remote device must never be shown the setup form, or whoever found an unclaimed tunnel URL could squat a code and lock the owner out of their own machine.
+- Some endpoints are refused to a remote caller **even with a valid session** (`_LOCAL_ONLY_PATHS` / `_LOCAL_ONLY_SUFFIXES`): `/api/videos/{id}/open` (launches a player on the owner's desktop), `/api/update/apply` (pushes code onto their PC), and everything under `/api/auth/` that manages the code or mints a pairing token.
+- The **pairing QR** (settings → 遠端存取) encodes the backend URL plus a session token — never the code — in a URL *fragment*, which browsers never send to a server. The gate wipes it from the address bar on read and asks the user to confirm the destination first, so a link someone else sends can't silently repoint their browser at a backend of the sender's choosing.
+- **Wrong access codes** are throttled per caller (rightmost `X-Forwarded-For` entry, since behind a tunnel every peer is 127.0.0.1) with an exponential lockout. Invalid *sessions* are deliberately **not** throttled: they are unguessable, and counting them would let a device whose session was just revoked lock the owner out by merely polling `/api/health`.
 
 ### Process model
 

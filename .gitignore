@@ -43,3 +43,7 @@ queue.txt
 
 # SQLite
 *.db
+
+# The access code's scrypt hash + the session tokens of paired devices. Local
+# state, never shipped: a committed one would hand every install the same code.
+oasis.auth.json

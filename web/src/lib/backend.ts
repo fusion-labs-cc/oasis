@@ -29,6 +29,31 @@ export function setBackendUrl(url: string): void {
   else window.localStorage.removeItem(STORAGE_KEY);
 }
 
+// Session token for the backend, attached to every /api/* call (see backendFetch).
+// It is what the access code is exchanged for at /api/auth/login — the code
+// itself is never stored and never travels again, so it stays out of URLs, logs
+// and <video> srcs. A backend with no code set wants no token at all (it is in
+// local-only mode and simply refuses everyone else).
+//
+// Keyed *per backend URL*: the same browser may talk to localhost at home and to
+// a tunnel URL from elsewhere, and a session issued by one must never be sent to
+// the other — nor be clobbered by it.
+function sessionKey(url: string): string {
+  return `oasis:session:${normalize(url)}`;
+}
+
+export function getSessionToken(url: string = getBackendUrl()): string {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(sessionKey(url)) ?? "";
+}
+
+export function setSessionToken(token: string, url: string = getBackendUrl()): void {
+  if (typeof window === "undefined") return;
+  const clean = token.trim();
+  if (clean) window.localStorage.setItem(sessionKey(url), clean);
+  else window.localStorage.removeItem(sessionKey(url));
+}
+
 // "Authorized" flag: set once the user has successfully entered the OASIS.
 // While set, the portal auto-connects on load (no manual "進入" needed) across
 // refreshes and reopens. It is cleared on a manual disconnect or a failed

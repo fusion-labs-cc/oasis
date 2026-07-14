@@ -43,8 +43,30 @@ const PORTAL_DOWNLOADS: { label: string; url: string }[] = [
   { label: "Windows", url: process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL_WIN || "" },
 ].filter((d) => d.url);
 
+// A pairing QR encodes the backend URL plus a session token minted on the
+// owner's PC, so a scanned phone lands logged in and the access code never
+// leaves that screen. Carried in the URL *fragment*, which browsers never send
+// to the server, and wiped from the address bar the moment it is read.
+const PAIR_FRAGMENT = "oasis-pair=";
+
+function readPairingFragment(): { url: string; token: string } | null {
+  const hash = window.location.hash.slice(1);
+  if (!hash.startsWith(PAIR_FRAGMENT)) return null;
+  try {
+    const raw = atob(hash.slice(PAIR_FRAGMENT.length).replace(/-/g, "+").replace(/_/g, "/"));
+    const data = JSON.parse(raw);
+    if (typeof data.u === "string" && typeof data.t === "string") {
+      return { url: data.u, token: data.t };
+    }
+  } catch {
+    // Malformed link — fall through to the normal gate.
+  }
+  return null;
+}
+
 export default function OasisGate() {
-  const { status, downReason, backendUrl, updateBackendUrl } = useBackend();
+  const { status, downReason, backendUrl, updateBackendUrl, codeSet, submitCode, applyPairing } =
+    useBackend();
 
   // Overlay lifecycle: shown while gated, briefly "revealing" on connect, then
   // fully unmounted so the app beneath is interactive. `visibleRef` mirrors
@@ -53,6 +75,19 @@ export default function OasisGate() {
   const visibleRef = useRef(true);
   const [revealing, setRevealing] = useState(false);
   const [draft, setDraft] = useState("");
+  // Access code, asked for only when the backend wants one we don't hold — which
+  // only ever happens on a device that isn't the one running the backend (a phone
+  // on a tunnel). The owner's own machine needs no credential.
+  const [codeDraft, setCodeDraft] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  // Lets someone stuck on the code prompt go back and retarget a different
+  // backend instead (e.g. they pasted the wrong tunnel URL).
+  const [editingUrl, setEditingUrl] = useState(false);
+  // A scanned pairing link, held until the user confirms the destination. Never
+  // applied silently: a link is something someone else can send you, and applying
+  // it unasked would let them point this browser at a backend of their choosing.
+  const [pending, setPending] = useState<{ url: string; token: string } | null>(null);
   // Failure feedback: a brief screen shake + faster-rising motes when a
   // user-initiated connection attempt comes back unreachable.
   const [shaking, setShaking] = useState(false);
@@ -76,6 +111,15 @@ export default function OasisGate() {
   useEffect(() => {
     setDraft(backendUrl);
   }, [backendUrl]);
+
+  // Pick up a scanned pairing link, and scrub it from the address bar (and from
+  // history) straight away so the session token doesn't linger there.
+  useEffect(() => {
+    const pair = readPairingFragment();
+    if (!pair) return;
+    setPending(pair);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, []);
 
   // Drive the gate off the connection status.
   useEffect(() => {
@@ -130,11 +174,46 @@ export default function OasisGate() {
     if (!url) return;
     // Mark this as a deliberate attempt so a failed ping triggers the shake.
     attempted.current = true;
+    setEditingUrl(false);
+    setAuthError("");
     // Persist + re-ping (BackendContext flips status to "checking" then pings).
     updateBackendUrl(url);
   }
 
+  // Log in with the access code from the owner's PC. The backend URL is already
+  // the right one by the time this form shows (that is how we learned a code was
+  // wanted), so the session is filed against the correct host.
+  async function enterCode() {
+    const code = codeDraft.trim();
+    if (!code || submitting) return;
+    attempted.current = true;
+    setSubmitting(true);
+    setAuthError("");
+    try {
+      await submitCode(code);
+      setCodeDraft("");
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : "存取碼錯誤");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function acceptPairing() {
+    if (!pending) return;
+    const { url, token } = pending;
+    setPending(null);
+    attempted.current = true;
+    await applyPairing(url, token);
+  }
+
   if (!visible) return null;
+
+  // Reachable, but it won't have us: either it wants an access code we don't
+  // hold, or it has none set and refuses us for not being its own machine.
+  const blocked = status === "down" && downReason === "auth" && !editingUrl;
+  const needsCode = blocked && codeSet;
+  const notConfigured = blocked && !codeSet;
 
   return (
     <div
@@ -222,7 +301,42 @@ export default function OasisGate() {
 
         {/* Connection zone */}
         <div className="mt-12 flex min-h-[132px] w-full max-w-sm flex-col items-center">
-          {status !== "down" ? (
+          {pending ? (
+            // A scanned pairing link. Confirm the destination before adopting it:
+            // anyone can send you a link, and one applied silently would hand this
+            // browser to a backend the sender chose.
+            <div className="w-full">
+              <div className="mb-3 flex items-center justify-center gap-2 text-xs tracking-[0.25em] text-white/45">
+                <span
+                  className="h-2 w-2 rounded-full bg-[#4be1ff] shadow-[0_0_10px_rgba(75,225,255,0.8)]"
+                  style={{ animation: "oasis-pulse 1.1s ease-in-out infinite" }}
+                />
+                偵測到配對連結
+              </div>
+              <p className="mb-3 text-left text-[11px] leading-relaxed text-white/40">
+                要將這台裝置連線到以下綠洲嗎？只有在這是你自己的入口座標時才繼續。
+              </p>
+              <code className="mb-4 block w-full truncate rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 text-left font-mono text-xs text-white/80">
+                {pending.url}
+              </code>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={acceptPairing}
+                  className="flex-1 rounded-lg bg-gradient-to-r from-[#4be1ff] to-[#a78bfa] px-5 py-2.5 text-sm font-bold text-[#050510] transition hover:brightness-110 active:scale-95"
+                >
+                  連線
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPending(null)}
+                  className="rounded-lg border border-white/15 px-5 py-2.5 text-sm font-semibold text-white/60 transition hover:bg-white/[0.06]"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          ) : status !== "down" ? (
             // "checking" (dialing in) or "up" (connected, gate now dissolving).
             // Both show the same calm pulse so a successful connect never flashes
             // the disconnect/failure form during the reveal animation.
@@ -242,6 +356,82 @@ export default function OasisGate() {
               <span className="text-xs tracking-[0.3em] text-white/45">
                 {status === "up" ? "連線成功" : "正在建立連線…"}
               </span>
+            </div>
+          ) : needsCode ? (
+            // The backend is right there and answering — it just wants the access
+            // code. Only a device that isn't its own machine ever sees this.
+            <div className="w-full">
+              <div className="mb-3 flex items-center justify-center gap-2 text-xs tracking-[0.25em] text-white/45">
+                <span
+                  className="h-2 w-2 rounded-full bg-[#ffc55c] shadow-[0_0_10px_rgba(255,197,92,0.8)]"
+                  style={{ animation: "oasis-pulse 1.1s ease-in-out infinite" }}
+                />
+                需要存取碼
+              </div>
+              <label className="mb-2 block text-left text-[10px] font-semibold uppercase tracking-[0.3em] text-white/35">
+                存取碼
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={codeDraft}
+                  onChange={(e) => setCodeDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") enterCode();
+                  }}
+                  placeholder="輸入存取碼"
+                  autoComplete="current-password"
+                  spellCheck={false}
+                  className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm text-white/90 outline-none backdrop-blur transition placeholder:text-white/25 focus:border-[#7aa2ff] focus:bg-white/[0.07]"
+                />
+                <button
+                  type="button"
+                  onClick={enterCode}
+                  disabled={submitting}
+                  className="shrink-0 rounded-lg bg-gradient-to-r from-[#4be1ff] to-[#a78bfa] px-5 py-2.5 text-sm font-bold text-[#050510] transition hover:brightness-110 active:scale-95 disabled:opacity-50"
+                >
+                  {submitting ? "驗證中…" : "進入"}
+                </button>
+              </div>
+              {authError ? (
+                <p className="mt-3 text-left text-[11px] leading-relaxed text-[#ff8fa3]">
+                  {authError}
+                </p>
+              ) : (
+                <p className="mt-3 text-left text-[11px] leading-relaxed text-white/30">
+                  輸入你在電腦上設定的存取碼。此裝置只需驗證一次。
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => setEditingUrl(true)}
+                className="mt-2 text-[11px] text-white/30 underline underline-offset-2 transition hover:text-white/60"
+              >
+                改用其他入口座標
+              </button>
+            </div>
+          ) : notConfigured ? (
+            // Reachable, but it has no access code — so it serves nobody but its
+            // own machine, and there is nothing this device can type to get in.
+            <div className="w-full">
+              <div className="mb-3 flex items-center justify-center gap-2 text-xs tracking-[0.25em] text-white/45">
+                <span
+                  className="h-2 w-2 rounded-full bg-[#ff5c7a] shadow-[0_0_10px_rgba(255,92,122,0.8)]"
+                  style={{ animation: "oasis-pulse 1.1s ease-in-out infinite" }}
+                />
+                尚未開放遠端存取
+              </div>
+              <p className="text-left text-[11px] leading-relaxed text-white/40">
+                這座綠洲還沒有設定存取碼，因此只接受本機連線。請到執行綠洲的那台電腦上開啟「設定 →
+                遠端存取」設定存取碼，即可用這台裝置進入。
+              </p>
+              <button
+                type="button"
+                onClick={() => setEditingUrl(true)}
+                className="mt-3 text-[11px] text-white/30 underline underline-offset-2 transition hover:text-white/60"
+              >
+                改用其他入口座標
+              </button>
             </div>
           ) : (
             <div className="w-full">
