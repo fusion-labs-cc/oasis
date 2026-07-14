@@ -45,7 +45,10 @@ export function backendUrl(path: string): string {
 // arbitrary website the user visits can neither send this header nor forge a
 // header-less request that the backend would accept. That closes the CSRF hole
 // on side-effecting endpoints (e.g. open-in-player) without any user setup.
-const CLIENT_HEADER: Record<string, string> = { "X-Oasis-Client": "1" };
+const CLIENT_HEADER: Record<string, string> = {
+  "X-Oasis-Client": "1",
+  "ngrok-skip-browser-warning": "true",
+};
 
 // fetch() against the local backend with the client header always attached.
 export function backendFetch(path: string, init: RequestInit = {}): Promise<Response> {
