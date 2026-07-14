@@ -23,7 +23,14 @@ cd web && npm run dev          # Next.js on :3000
 
 Frontend checks and deploy (`web/`): `npm run lint`, `npm run build`, `npm run preview` / `npm run deploy` (Cloudflare Workers via OpenNext).
 
-Frozen backend build: `pyinstaller --noconfirm oasis-backend.spec` → `dist/oasis-backend/`. Must be built **on the target OS** (PyInstaller cannot cross-compile). Releasing is `git tag v0.1.0 && git push origin v0.1.0`, which triggers `.github/workflows/release.yml` to build Windows + macOS-arm64, bundle FFmpeg, and publish the zips.
+Frozen backend build — **two steps**, because the executable deliberately does not contain the backend's source (see *Source checkout vs. frozen build*):
+
+```bash
+pyinstaller --noconfirm oasis-backend.spec                      # → dist/oasis-backend/ (exe + _internal/)
+python scripts/app_payload.py --build dist/oasis-backend/app --version v0.1.0   # → the source it runs
+```
+
+Must be built **on the target OS** (PyInstaller cannot cross-compile). Releasing is `git tag v0.1.0 && git push origin v0.1.0`, which triggers `.github/workflows/release.yml` to build Windows + macOS-arm64, bundle FFmpeg, and publish both full zips plus `oasis-app.zip`.
 
 **There are no tests** — no pytest, no jest/vitest, no test files anywhere in `backend/` or `web/src/`. Verify changes by exercising the running app, not by running a suite.
 
@@ -61,29 +68,55 @@ The shipped code contains **no site-specific logic by design**. `site_config.py`
 Two details worth knowing:
 
 - `detect_site()` matches on the host's **registrable-domain label**, never a bare substring, so a look-alike host (`example.com.evil.com`) is rejected before a browser navigates to it.
-- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json` and `missav.json` are committed, and `oasis-backend.spec` bundles the directory into the frozen build. They update via `git pull` (source checkout) or the release zip (frozen build); users add their own alongside them.
+- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json` and `missav.json` are committed, and `scripts/app_payload.py` copies the directory into the app payload (`app/sites/`). In a frozen build the adapters actually *loaded* come from a writable `sites/` next to the `.exe`: `run_backend.py` copies the shipped ones into it on every start and **leaves every other file alone**, so a release updates `jable.json`/`missav.json` while a user's own adapters survive updates. (The flip side: editing a shipped adapter in place is reverted on the next start — rename it to keep it.)
 
 The download pipeline (`download.py`) is: `detect_site` → Selenium extracts the title and m3u8 URL → `resolve_m3u8_to_stream` picks the highest-bandwidth variant from a master playlist → `crawler.py` fetches TS segments across 16 threads (AES-CBC decrypt when keyed, with a **fresh cipher per segment** — CBC is stateful and must never be shared across threads) → merge → FFmpeg remux → move into `movies/`. Overall percent is mapped as: 1% setup, 3–95% segments, 96% merge, 98% encode, 100% done.
 
 ### Source checkout vs. frozen build
 
-The same backend code runs in two very different layouts, reconciled purely through **environment variables**. Any code touching paths must honour them:
+**The `.exe` is a launcher, not the app.** PyInstaller freezes only the Python runtime, the third-party packages, and `run_backend.py`. The backend's own source ships as **plain `.py` files in `app/` next to the executable** and is imported from disk — `oasis-backend.spec` strips those modules back out of the frozen archive (`a.pure`) precisely so the loose copies are the ones that get imported. PyInstaller's `FrozenImporter` outranks the path finder, so a module left in the archive would silently shadow the file on disk.
+
+That split exists so shipping new backend code replaces **no file the OS has locked** — see *Versioning and self-update*. Analysis still walks the real source (`run_backend.py` imports `api`), which is the only reason the dependencies get discovered at all; don't "tidy" that import away.
+
+Frozen layout — everything except `app/` and `_internal/` belongs to the user and survives updates:
+
+```
+oasis-backend.exe   launcher       _internal/  frozen Python + packages + PLATFORM, RUNTIME
+app/                backend source + VERSION   ← the update payload; app/sites/ = shipped adapters
+sites/              live adapters (shipped + the user's own)
+bin/ffmpeg          oasis.db, movies/          .oasis-update/ (staging + logs)
+```
+
+The two layouts are reconciled purely through **environment variables**. Any code touching paths must honour them:
 
 | Var | Purpose |
 | --- | --- |
 | `DB_PATH` | SQLite location (default `backend/oasis.db`) |
 | `OASIS_MEDIA_ROOT` | Root that `movies/` and DB `video_path` values resolve against |
 | `OASIS_SITES_DIR` | Adapter directory |
+| `OASIS_APP_DIR` | The loose source dir (so `version.py`/`updater.py` can find `app/`) |
 
-`run_backend.py` is the frozen entry point and sets all three so writable state (DB, `movies/`) lands **next to the `.exe`** and survives updates, rather than inside PyInstaller's read-only extraction dir. It also puts the bundled `bin/ffmpeg` on `PATH` (`encode.py` shells out to a bare `ffmpeg`) and **must** call `multiprocessing.freeze_support()` first — without it, every spawned worker re-launches the whole server, i.e. a fork bomb on Windows.
+`run_backend.py` sets all of them so writable state (DB, `movies/`) lands **next to the `.exe`**, not inside PyInstaller's extraction dir. It also puts the bundled `bin/ffmpeg` on `PATH` (`encode.py` shells out to a bare `ffmpeg`), and two things about its ordering are load-bearing: it **must** call `multiprocessing.freeze_support()` first — without it every spawned worker re-launches the whole server, i.e. a fork bomb on Windows — and `app/` must go on `sys.path` at **module level, before that call**, because a spawned worker re-executes the `.exe` and unpickles its target (`api._analyze_worker`, `download.*`) by module name, which only resolves if the loose source is already importable.
 
 `video_path` is stored **relative to `MEDIA_ROOT`**. Every endpoint that resolves it (`stream`, `delete`, `open`) re-checks that the absolute path stays under `MEDIA_ROOT` to block path traversal — preserve that guard.
 
 ### Versioning and self-update
 
-CI stamps `VERSION` (the git tag) and `PLATFORM` (this OS's release asset name) at the repo root before freezing; the spec bundles them and `version.py` reads them back. A source checkout has no `VERSION`, reports `"dev"`, and is deliberately treated as **never behind** so local builds are not nagged.
+Two stamps, and *where* each lives is the design:
 
-`updater.py` implements in-app update for the frozen build only: download the matching release zip → a **separate helper process** swaps the files in *after* the backend stops → the backend relaunches and the frontend reconnects by polling `/api/health`. The DB and `movies/` are outside the update payload and are preserved. The update spans three processes, so it writes log files that survive the swap (`/api/update/logs` reads them back — that is how a silently failed update gets diagnosed).
+- **`VERSION`** (the git tag) ships **inside the app payload**, `app/VERSION`. It names the code, and the code is what an update replaces — an `.exe` that never changes cannot report a new version. A source checkout has none, reports `"dev"`, and is deliberately treated as **never behind** so local builds are not nagged.
+- **`RUNTIME`** ships **inside `_internal/`**. It fingerprints what the executable actually froze: the Python version, `requirements.txt`, and `run_backend.py` (`scripts/app_payload.py` computes it; CI stamps it). It changes only when the `.exe` must be rebuilt.
+
+`PLATFORM` (this OS's full-install asset name) also lives in `_internal/`. `version.py` reads all three back.
+
+`updater.py` (frozen build only) therefore has **two paths**, chosen by comparing the release's `RUNTIME` against the running build's:
+
+- **Light — almost always.** Same `RUNTIME` ⇒ the new source runs on the `.exe` already installed. Download `oasis-app.zip` (~35 KB), stage it in `.oasis-update/pending-app`, relaunch **itself**, exit; the fresh process swaps `app/` in *before importing anything from it* (`_apply_pending_update`). Nothing that gets replaced is a file the OS has open, so there is no locked-file problem, no helper script, and no rollback to get right.
+- **Full — only when `RUNTIME` differs** (a dependency was added, Python bumped). Download the OS's full zip and hand off to a detached OS-native helper (sh / PowerShell) that kills this backend, swaps every top-level entry, and relaunches. This path exists solely because **a running process cannot overwrite its own executable or loaded libraries** — hence the all-or-nothing rename-aside-then-install-with-rollback dance, and hence the backend never exiting on its own here. It is also why `DETACHED_PROCESS` must not be used to spawn the helper (PowerShell exits instantly without a console; use `CREATE_NO_WINDOW`).
+
+A light update that can't be applied changes **nothing on disk** and falls back to the full path; a full update that fails rolls back and relaunches the old build. `oasis.db`, `movies/` and `sites/` are outside both payloads and are always preserved. Updates span multiple processes, so every step is logged to `.oasis-update/`, which no payload touches — `/api/update/logs` reads it back, and that is how a silently failed update gets diagnosed.
+
+Releasing is `git tag v0.1.0 && git push origin v0.1.0`. CI publishes three assets: the two full installs, plus the OS-independent **`oasis-app.zip`** that the light path consumes.
 
 ### Frontend state
 

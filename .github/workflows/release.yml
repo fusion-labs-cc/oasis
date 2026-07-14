@@ -35,18 +35,28 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pyinstaller
 
-      # Stamp the build with the tag that triggered it (branch name on a manual
-      # run) and the release asset this job produces. oasis-backend.spec bundles
-      # both files; version.py reads them back so the app can compare itself
-      # against the latest GitHub Release and download the matching OS build.
-      - name: Stamp version and platform
-        shell: pwsh
+      # Stamps that describe the *executable*, bundled into it by
+      # oasis-backend.spec and read back by version.py:
+      #   PLATFORM — the asset this job produces, so a build that ever needs a
+      #              full reinstall fetches the same variant it came from.
+      #   RUNTIME  — fingerprint of the Python + requirements.txt + launcher this
+      #              is frozen against. A later release stamped the same can be
+      #              installed by replacing app/ alone, no new .exe.
+      # (VERSION is not stamped here — it ships with the source, in app/VERSION.)
+      - name: Stamp platform and runtime
+        shell: bash
         run: |
-          Set-Content -Path VERSION -Value $env:GITHUB_REF_NAME -NoNewline
-          Set-Content -Path PLATFORM -Value 'oasis-backend-win64.zip' -NoNewline
+          printf '%s' 'oasis-backend-win64.zip' > PLATFORM
+          python scripts/app_payload.py --runtime > RUNTIME
 
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec
+
+      # The backend's source is NOT inside the .exe — it ships next to it, and is
+      # imported from there at runtime. Same payload as oasis-app.zip below.
+      - name: Assemble the app payload
+        shell: bash
+        run: python scripts/app_payload.py --build dist/oasis-backend/app --version "$GITHUB_REF_NAME"
 
       - name: Bundle FFmpeg
         shell: pwsh
@@ -89,17 +99,17 @@ jobs:
           pip install -r backend/requirements.txt
           pip install pyinstaller
 
-      # Stamp the build with the tag that triggered it (branch name on a manual
-      # run) and the release asset this job produces. oasis-backend.spec bundles
-      # both files; version.py reads them back so the app can compare itself
-      # against the latest GitHub Release and download the matching OS build.
-      - name: Stamp version and platform
+      # See the Windows job for what these stamps are and why VERSION isn't one.
+      - name: Stamp platform and runtime
         run: |
-          printf '%s' "$GITHUB_REF_NAME" > VERSION
           printf '%s' 'oasis-backend-macos-arm64.zip' > PLATFORM
+          python scripts/app_payload.py --runtime > RUNTIME
 
       - name: Build backend (onedir)
         run: pyinstaller --noconfirm oasis-backend.spec
+
+      - name: Assemble the app payload
+        run: python scripts/app_payload.py --build dist/oasis-backend/app --version "$GITHUB_REF_NAME"
 
       - name: Bundle FFmpeg
         run: |
@@ -132,6 +142,27 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
+      # Checkout first: it cleans the workspace, which would wipe the downloaded
+      # artifacts if they landed before it.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"      # must match the build jobs: the RUNTIME
+                                      # stamp includes the Python version, and a
+                                      # mismatch here would make every update take
+                                      # the full path for no reason.
+
+      # The star of the release: the backend source on its own, with no executable
+      # and no frozen runtime. An installed build whose RUNTIME matches this one
+      # updates by unzipping this over app/ — ~35 KB, and it replaces nothing the
+      # OS has locked. The two zips below are only needed for a first install, or
+      # when the frozen runtime itself changed.
+      - name: Build the source-only update payload
+        run: |
+          python scripts/app_payload.py --build app --version "$GITHUB_REF_NAME"
+          (cd app && zip -qr ../oasis-app.zip .)
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -146,5 +177,7 @@ jobs:
       - name: Publish Release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: |
+            artifacts/**/*.zip
+            oasis-app.zip
           generate_release_notes: true

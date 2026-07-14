@@ -4,33 +4,40 @@
 Apply an in-app update for the frozen (PyInstaller onedir) build.
 
 The settings page can already *check* GitHub Releases (see version.py). This
-module performs the actual swap: the download runs in a background thread and
-reports progress (polled via /api/update/progress), then it hands off to a
-small OS-native helper script that stops this backend, replaces the app files
-in place, and relaunches the new backend.
+module performs the actual install, in one of two ways.
 
-The backend does NOT exit on its own: it stays up and serving throughout the
-download, and it is the *helper* that kills this process once the download is
-done — this backend never terminates itself. That keeps the "downloading →
-installing → restarting" progress reachable right up to the handoff.
+THE LIGHT PATH — replace app/, keep the executable. This is what almost every
+release takes. The .exe is only a launcher: the backend's source lives in `app/`
+as plain .py files (see run_backend.py), so installing a new version means
+unzipping a few hundred KB over that one folder. Nothing that gets replaced is a
+file the OS has open, so there is no locked-file problem, no helper script and no
+rollback to get right — the backend stages the new source in `.oasis-update/`,
+relaunches itself, and exits; the fresh process swaps the folder in before it
+imports anything from it. Whether this is possible is decided by the RUNTIME stamp
+(version.py): it fingerprints the Python + requirements.txt the executable was
+frozen against, so a release stamped the same runs on the .exe already installed.
 
-Why a helper script and not plain Python:
+THE FULL PATH — replace everything, executable included. Taken only when the new
+release's RUNTIME differs, i.e. a dependency was added or Python was bumped, so
+the frozen packages in the running .exe are not the ones the new source needs.
+This is the expensive, dangerous one, and everything below it exists because of a
+single OS rule: a running process cannot overwrite its own executable or its
+loaded libraries. Hence:
 
-  * A running process cannot overwrite its own executable / loaded libraries
-    (hard error on Windows, and `_internal/` holds the frozen Python itself), so
-    the swap must happen *after* this process is gone.
-  * The helper is OS-native (sh / PowerShell) so it can keep running once this
-    process is gone, and so extraction uses `ditto`/`unzip`/`Expand-Archive`,
-    which preserve the macOS bundle's symlinks and exec bits that Python's
-    zipfile would flatten.
+  * The swap has to happen *after* this process is gone, so it is done by a
+    detached OS-native helper script (sh / PowerShell), which also gets us
+    `ditto`/`unzip`/`Expand-Archive` — needed to preserve the macOS bundle's
+    symlinks and exec bits, which Python's zipfile would flatten.
+  * The backend does NOT exit on its own on this path: it stays up and serving
+    through the download, and the *helper* kills it. That keeps the
+    "downloading → installing → restarting" progress reachable to the handoff.
+  * The swap is all-or-nothing: old entries are renamed aside, new ones installed
+    only once every rename succeeded, any failure rolls back. A locked file
+    leaves the previous version running and reports why, instead of half-deleting
+    the install.
 
-User data (oasis.db, movies/) lives next to the executable but is NOT part of
-the release zip, so the entry-by-entry swap leaves it untouched.
-
-The swap itself is all-or-nothing: the old entries are renamed aside, the new
-ones are only installed once every rename has succeeded, and any failure rolls
-the old build back. A locked file therefore leaves the previous version running
-and reports why, instead of half-deleting the install.
+User data (oasis.db, movies/, sites/) lives next to the executable but is NOT part
+of either payload, so both paths leave it untouched.
 
 Every step is logged to `.oasis-update/` (see _LOG_FILES). That folder isn't part
 of the release zip, so the logs survive the swap and the relaunched backend can
@@ -43,12 +50,14 @@ Only meaningful for a frozen build; a source checkout updates via `git pull`
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
 import time
 import traceback
 import urllib.request
+import zipfile
 from datetime import datetime
 
 import version
@@ -56,6 +65,11 @@ import version
 # Folder (next to the executable) that holds the downloaded zip, the generated
 # helper script, and its log. Kept out of the way with a leading dot.
 _WORK_DIRNAME = ".oasis-update"
+
+# Where the light path leaves the extracted new source for run_backend.py to swap
+# in on the next start. Both names are duplicated there — keep them in sync.
+_PENDING_DIRNAME = "pending-app"
+_WAIT_PID_ENV = "OASIS_UPDATE_WAIT_PID"
 
 # Log files written under _WORK_DIRNAME, in the order they are produced. They are
 # the only trace left once the helper kills this backend, and /api/update/logs
@@ -147,11 +161,14 @@ def _log_environment() -> None:
     read-only mount), or an install dir that isn't what we think it is.
     """
     base = _base_dir()
+    app = _app_dir()
     _log(f"--- update run start (pid={os.getpid()}) ---")
     _log(f"version={version.app_version()} platform_stamp={version._bundled_file('PLATFORM')}")
+    _log(f"runtime={version.runtime_stamp()}")
     _log(f"sys.platform={sys.platform} frozen={getattr(sys, 'frozen', False)}")
     _log(f"executable={sys.executable}")
     _log(f"base={base} writable={os.access(base, os.W_OK)}")
+    _log(f"app={app} writable={os.access(app, os.W_OK)}")
     try:
         usage = __import__("shutil").disk_usage(base)
         _log(f"disk free={usage.free / (1 << 20):.0f} MiB")
@@ -197,6 +214,142 @@ def _download(url: str, dest: str) -> None:
     if total and size != total:
         raise OSError(f"下載的更新檔不完整（{size}/{total} bytes）")
     _set(received=received, percent=100)
+
+
+def _app_dir() -> str:
+    """The loose backend source the executable runs (set by run_backend.py)."""
+    return os.environ.get("OASIS_APP_DIR") or os.path.join(_base_dir(), "app")
+
+
+def _extract_app(zip_path: str, dest: str) -> str:
+    """Unpack the source-only payload; return the folder that holds api.py.
+
+    Python's zipfile is enough here (the full path needs ditto/unzip): the payload
+    is .py and .json text files, with no symlinks or exec bits to flatten.
+    """
+    shutil.rmtree(dest, ignore_errors=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        archive.extractall(dest)
+    if os.path.isfile(os.path.join(dest, "api.py")):
+        return dest
+    # Tolerate a zip that wraps everything in a single folder.
+    for name in sorted(os.listdir(dest)):
+        inner = os.path.join(dest, name)
+        if os.path.isfile(os.path.join(inner, "api.py")):
+            return inner
+    raise OSError("更新檔內容不正確（找不到 api.py）")
+
+
+def _read_file(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _light_update(app_url: str, base: str, work: str) -> bool:
+    """Install the new release by replacing app/ alone, and relaunch. Usually this.
+
+    Returns False *having changed nothing on disk* when this release cannot be
+    installed onto the running executable — no RUNTIME stamp to compare, or a
+    RUNTIME that differs, meaning the new source wants packages this .exe did not
+    freeze. The caller then falls back to the full swap.
+
+    On success this function does not return: the process relaunches itself and
+    exits, and the fresh one applies the staged folder before importing from it
+    (run_backend.py). It is deliberately the *new* process that moves the
+    directory — doing it here would pull the source out from under a running
+    backend that may still lazily import from it.
+    """
+    installed_runtime = version.runtime_stamp()
+    if not installed_runtime:
+        _log("light update unavailable: this build carries no RUNTIME stamp")
+        return False
+
+    zip_path = os.path.join(work, "app.zip")
+    _download(app_url, zip_path)
+
+    staging = os.path.join(work, "staging-app")
+    root = _extract_app(zip_path, staging)
+    release_runtime = _read_file(os.path.join(root, "RUNTIME"))
+    _log(f"runtime installed={installed_runtime} release={release_runtime}")
+    if release_runtime != installed_runtime:
+        _log("runtime differs — this release needs a rebuilt executable; using the full install")
+        shutil.rmtree(staging, ignore_errors=True)
+        return False
+
+    pending = os.path.join(work, _PENDING_DIRNAME)
+    shutil.rmtree(pending, ignore_errors=True)
+    os.replace(root, pending)          # same filesystem: both live under base/
+    shutil.rmtree(staging, ignore_errors=True)
+    _log(f"staged new source at {pending} (version {_read_file(os.path.join(pending, 'VERSION'))})")
+
+    # Announce "installing" before relaunching, so a poll landing in the handoff
+    # grace sees it — this is the last phase this process can report.
+    _set(phase="installing", percent=100)
+    _relaunch_self(base, work)
+    _log(f"relaunched; exiting in {_HANDOFF_GRACE_S}s so the new backend can take port and swap app/")
+    time.sleep(_HANDOFF_GRACE_S)
+    _log("=== handing over ===")
+    # Hard exit, not a graceful uvicorn shutdown: we are on a worker thread with no
+    # handle on the server, and the new backend is already blocked waiting for this
+    # pid to disappear before it can bind the port. The full path is killed with
+    # SIGKILL/Stop-Process at the same point, so nothing new is skipped here.
+    os._exit(0)
+
+
+def _relaunch_self(base: str, work: str) -> None:
+    """Start a fresh copy of this executable, which will apply the staged update.
+
+    The child is handed this pid: it waits for us to exit before touching app/ or
+    binding port 8000 (see run_backend.py). Unlike the full path's helper this is
+    our own console app, not powershell, so it needs no console hand-holding — but
+    it does need CREATE_NEW_CONSOLE, since the console it inherits from us belongs
+    to the launcher that is about to close, and CREATE_BREAKAWAY_FROM_JOB, since a
+    child stays in the parent's job object and some launchers kill the job on
+    close, which would take the new backend down with the old one.
+    """
+    env = dict(os.environ)
+    env[_WAIT_PID_ENV] = str(os.getpid())
+
+    if sys.platform == "win32":
+        CREATE_NEW_CONSOLE = 0x00000010
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        kwargs = dict(cwd=base, env=env, close_fds=True)
+        try:
+            proc = subprocess.Popen(
+                [sys.executable],
+                creationflags=CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB,
+                **kwargs,
+            )
+            _log(f"relaunch spawned pid={proc.pid} (breakaway from job)")
+        except OSError as exc:
+            _log(f"breakaway spawn refused ({exc}); retrying without CREATE_BREAKAWAY_FROM_JOB")
+            proc = subprocess.Popen(
+                [sys.executable], creationflags=CREATE_NEW_CONSOLE, **kwargs
+            )
+            _log(f"relaunch spawned pid={proc.pid} (no breakaway)")
+    else:
+        out = open(os.path.join(work, "backend.log"), "ab")
+        proc = subprocess.Popen(
+            [sys.executable],
+            cwd=base,
+            env=env,
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=out,
+            stderr=out,
+            close_fds=True,
+        )
+        _log(f"relaunch spawned pid={proc.pid}")
+
+    # If it died on the spot (blocked by antivirus, a broken install), nobody will
+    # ever swap app/ in or serve the API again — and we are about to exit. Say so
+    # in the log, which is the only thing that will still be around to say it.
+    time.sleep(0.3)
+    if proc.poll() is not None:
+        _log(f"ERROR: relaunched backend exited immediately with code {proc.returncode}")
 
 
 def _write_helper(base: str, work: str, zip_path: str, exe: str) -> str:
@@ -594,26 +747,45 @@ def _spawn_detached(script: str) -> None:
         _log(f"ERROR: helper exited immediately with code {proc.returncode} — no swap will happen")
 
 
-def _run_update(download_url: str, base: str, latest) -> None:
-    """Background worker: download the zip, then spawn the swap+relaunch helper.
+def _full_update(download_url: str, base: str, work: str) -> None:
+    """Download the whole install and hand off to the swap+relaunch helper.
 
-    Runs off the request thread so the backend stays up and serving progress
-    while the download streams. On the final step it flips the phase to
-    "installing" and spawns the helper, which kills this process and swaps the
-    files in. Any failure flips the phase to "error"; the backend keeps running.
+    The fallback path, for when the executable itself has to be replaced. This
+    process keeps serving progress right up to the handoff and is then killed by
+    the helper — it never exits on its own, because it cannot overwrite the .exe
+    and libraries it is running from.
+    """
+    zip_path = os.path.join(work, "download.zip")
+    _download(download_url, zip_path)
+    # Download done. Announce "installing" *before* spawning the helper so a
+    # poll landing in the handoff grace sees it; the helper then kills us.
+    _set(phase="installing", percent=100)
+    script = _write_helper(base, work, zip_path, sys.executable)
+    _log(f"helper written to {script}; handing off (this process is about to be killed)")
+    _spawn_detached(script)
+    _log("handoff done — waiting to be killed by the helper")
+
+
+def _run_update(info: dict, base: str) -> None:
+    """Background worker: install the release, preferring the light path.
+
+    Runs off the request thread so the backend stays up and serving progress while
+    the download streams. Any failure flips the phase to "error" and leaves the
+    running backend untouched.
     """
     work = os.path.join(base, _WORK_DIRNAME)
-    zip_path = os.path.join(work, "download.zip")
     try:
         os.makedirs(work, exist_ok=True)
-        _download(download_url, zip_path)
-        # Download done. Announce "installing" *before* spawning the helper so a
-        # poll landing in the handoff grace sees it; the helper then kills us.
-        _set(phase="installing", percent=100)
-        script = _write_helper(base, work, zip_path, sys.executable)
-        _log(f"helper written to {script}; handing off (this process is about to be killed)")
-        _spawn_detached(script)
-        _log("handoff done — waiting to be killed by the helper")
+
+        app_url = info.get("app_download_url")
+        if app_url and _light_update(app_url, base, work):
+            return  # unreachable: _light_update exits the process on success
+
+        download_url = info.get("download_url")
+        if not download_url:
+            raise OSError("這個版本需要重新安裝，但找不到適用於此系統的安裝檔")
+        _log("installing the full build (executable included)")
+        _full_update(download_url, base, work)
     except Exception as exc:  # download failed, disk full, spawn blocked, ...
         _log(f"ERROR: update failed: {exc!r}\n{traceback.format_exc()}")
         _set(phase="error", error=f"更新失敗：{exc}")
@@ -650,6 +822,7 @@ def apply_update(timeout: float = 6.0) -> dict:
     _log(
         f"check: current={info.get('current')} latest={info.get('latest')} "
         f"update_available={info.get('update_available')} "
+        f"app_download_url={info.get('app_download_url')} "
         f"download_url={info.get('download_url')} error={info.get('error')}"
     )
     if info.get("error"):
@@ -657,17 +830,14 @@ def apply_update(timeout: float = 6.0) -> dict:
     if not info.get("update_available"):
         return {"status": "error", "error": "已是最新版本，沒有可用的更新。"}
 
-    download_url = info.get("download_url")
-    if not download_url:
+    if not info.get("app_download_url") and not info.get("download_url"):
         return {"status": "error", "error": "找不到適用於此系統的更新下載檔。"}
 
     latest = info.get("latest")
     base = _base_dir()
     # Set "downloading" up front so a poll racing the thread start sees progress.
     _set(phase="downloading", percent=0, received=0, total=0, latest=latest, error=None)
-    threading.Thread(
-        target=_run_update, args=(download_url, base, latest), daemon=True
-    ).start()
+    threading.Thread(target=_run_update, args=(info, base), daemon=True).start()
     _log(f"update to {latest} started in background")
     return {"status": "updating", "latest": latest}
 
@@ -735,6 +905,10 @@ def collect_logs(max_bytes: int = 64 * 1024) -> dict:
         "version": version.app_version(),
         "platform": sys.platform,
         "platform_stamp": version._bundled_file("PLATFORM"),
+        # Which install path an update will take, and why: a light update swaps
+        # app/ only, and needs the release's RUNTIME to match this one.
+        "runtime": version.runtime_stamp(),
+        "app": _app_dir(),
         "frozen": bool(getattr(sys, "frozen", False)),
         "pid": os.getpid(),
         "base": base,
