@@ -1,0 +1,104 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+One-click bootstrap (installs system deps, creates the venv, runs `npm install`, starts both servers):
+
+```bash
+./oasis-portal.sh              # macOS / Linux
+./oasis-portal.sh --backend-only   # skip the Next.js frontend
+# Windows: double-click oasis-portal.bat (wraps oasis-portal.ps1)
+```
+
+The portal also runs `git pull --ff-only` on every start, so a source checkout self-updates.
+
+Running the two halves by hand:
+
+```bash
+./oasis/bin/python -m uvicorn api:app --app-dir backend --reload --port 8000
+cd web && npm run dev          # Next.js on :3000
+```
+
+Frontend checks and deploy (`web/`): `npm run lint`, `npm run build`, `npm run preview` / `npm run deploy` (Cloudflare Workers via OpenNext).
+
+Frozen backend build: `pyinstaller --noconfirm oasis-backend.spec` → `dist/oasis-backend/`. Must be built **on the target OS** (PyInstaller cannot cross-compile). Releasing is `git tag v0.1.0 && git push origin v0.1.0`, which triggers `.github/workflows/release.yml` to build Windows + macOS-arm64, bundle FFmpeg, and publish the zips.
+
+**There are no tests** — no pytest, no jest/vitest, no test files anywhere in `backend/` or `web/src/`. Verify changes by exercising the running app, not by running a suite.
+
+## Architecture
+
+Oasis is **not a hosted web app**. It is a public Next.js frontend (deployed to Cloudflare Workers at `oasis.fusion-labs.cc`) that talks to a **FastAPI backend each user runs on their own machine** at `127.0.0.1:8000`. The browser calls that local backend **directly** — there is no server-side proxy and no server-side data fetching, which is why the whole frontend is client components over `localhost`.
+
+> `web/README.md` is stale: it describes Next.js route handlers proxying to FastAPI. That is no longer true (see `web/src/lib/backend.ts` and `api.ts`). Trust the code.
+
+Because the page is HTTPS and the backend is plain HTTP on localhost (browsers exempt localhost from mixed-content blocking), two guards stand in for the usual same-origin protection:
+
+- **CORS allowlist** — `ALLOWED_ORIGINS` (default: `localhost:3000` + the deployed site).
+- **`X-Oasis-Client: 1` header** — required on every `/api/*` call by a middleware in `api.py`. It is a public, fixed value, not a secret: requiring a *custom* header forces a CORS preflight, which the backend only answers for allowed origins. That closes CSRF on side-effecting endpoints like `/api/videos/{id}/open` (which launches a local player). `/api/stream/*` is exempt, since `<video src>` cannot send custom headers.
+
+Any new `/api/*` endpoint inherits this automatically; any new frontend call must go through `backendFetch()` in `web/src/lib/api.ts`, never a bare `fetch`.
+
+### Process model
+
+Scraping and downloading are heavy and blocking (Selenium, network I/O, FFmpeg), so `api.py` spawns them as **separate OS processes**, not threads, to keep the event loop responsive.
+
+- **Analyses** run in parallel, keyed by `task_id` in `active_analyses`.
+- **Downloads are serialised** — exactly one at a time, FIFO through `download_queue`. `_pump_downloads()` reaps the finished one and starts the next; it is driven by `_bg_check_analyses()`, an asyncio loop that ticks every second.
+
+Since worker processes cannot share memory with the API, IPC is done through the filesystem in `$TMPDIR/oasis_progress/`:
+
+- `{id}.txt` — the worker writes whole-percent progress; the API reads it back. Progress only ever moves **forward** (seeded from the existing file on resume) so a resumed download's bar never dips back to the setup phase's low value.
+- `{id}.cancel` — the API drops this marker *before* SIGTERMing a download. The worker's SIGTERM handler wipes partial segments **only if the marker is present**. A plain shutdown (Ctrl+C, restart) leaves no marker, so segments survive on disk and the download resumes from them.
+
+In-memory queue state is volatile, so the durable source of truth is the **`download_pending` column** in SQLite. `_resume_pending_downloads()` rebuilds the queue from it on startup.
+
+### Site adapters
+
+The shipped code contains **no site-specific logic by design**. `site_config.py` is a generic engine driven entirely by JSON adapters (CSS selectors, m3u8 extraction rules, required headers, Selenium options). Adapters live in `backend/sites/*.json`; the schema is documented in `backend/sites.example.json`. Keep it that way — site-specific behaviour belongs in an adapter, not in Python.
+
+Two details worth knowing:
+
+- `detect_site()` matches on the host's **registrable-domain label**, never a bare substring, so a look-alike host (`example.com.evil.com`) is rejected before a browser navigates to it.
+- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json` and `missav.json` are committed, and `oasis-backend.spec` bundles the directory into the frozen build. They update via `git pull` (source checkout) or the release zip (frozen build); users add their own alongside them.
+
+The download pipeline (`download.py`) is: `detect_site` → Selenium extracts the title and m3u8 URL → `resolve_m3u8_to_stream` picks the highest-bandwidth variant from a master playlist → `crawler.py` fetches TS segments across 16 threads (AES-CBC decrypt when keyed, with a **fresh cipher per segment** — CBC is stateful and must never be shared across threads) → merge → FFmpeg remux → move into `movies/`. Overall percent is mapped as: 1% setup, 3–95% segments, 96% merge, 98% encode, 100% done.
+
+### Source checkout vs. frozen build
+
+The same backend code runs in two very different layouts, reconciled purely through **environment variables**. Any code touching paths must honour them:
+
+| Var | Purpose |
+| --- | --- |
+| `DB_PATH` | SQLite location (default `backend/oasis.db`) |
+| `OASIS_MEDIA_ROOT` | Root that `movies/` and DB `video_path` values resolve against |
+| `OASIS_SITES_DIR` | Adapter directory |
+
+`run_backend.py` is the frozen entry point and sets all three so writable state (DB, `movies/`) lands **next to the `.exe`** and survives updates, rather than inside PyInstaller's read-only extraction dir. It also puts the bundled `bin/ffmpeg` on `PATH` (`encode.py` shells out to a bare `ffmpeg`) and **must** call `multiprocessing.freeze_support()` first — without it, every spawned worker re-launches the whole server, i.e. a fork bomb on Windows.
+
+`video_path` is stored **relative to `MEDIA_ROOT`**. Every endpoint that resolves it (`stream`, `delete`, `open`) re-checks that the absolute path stays under `MEDIA_ROOT` to block path traversal — preserve that guard.
+
+### Versioning and self-update
+
+CI stamps `VERSION` (the git tag) and `PLATFORM` (this OS's release asset name) at the repo root before freezing; the spec bundles them and `version.py` reads them back. A source checkout has no `VERSION`, reports `"dev"`, and is deliberately treated as **never behind** so local builds are not nagged.
+
+`updater.py` implements in-app update for the frozen build only: download the matching release zip → a **separate helper process** swaps the files in *after* the backend stops → the backend relaunches and the frontend reconnects by polling `/api/health`. The DB and `movies/` are outside the update payload and are preserved. The update spans three processes, so it writes log files that survive the swap (`/api/update/logs` reads them back — that is how a silently failed update gets diagnosed).
+
+### Frontend state
+
+Three nested providers in `SiteChrome`, each depending on the one above:
+
+1. **`BackendProvider`** — health polling (10s connected, 3s retrying), plus the `oasis:authorized` gate flag. An inline script in `layout.tsx` reads that flag before first paint to avoid flashing the entrance gate at returning users.
+2. **`VideoProvider`** — the catalog store. The whole catalog is fetched once; **filtering and faceting happen client-side** (`computeFacets`).
+3. **`TasksProvider`** — the analysis/download task list, driven by polling. There are no websockets or SSE anywhere; every live update in the UI is a poll.
+
+Tags are stored as JSON text in SQLite, so tag filtering is done **in Python over decoded rows, not via SQL `LIKE`** (which would mishandle CJK). Metadata (code / actress / title) is regex-extracted from the scraped page title, then Japanese titles are machine-translated to zh-TW via `deep-translator`.
+
+`AwakeMode` is a "boss key" that disguises the whole site as Google (default `⌘X` / `Alt+X`), including the tab title and favicon, persisted across reloads. It, and the keyboard shortcuts, are configured in `web/src/lib/settings.ts` (localStorage).
+
+## Conventions
+
+- **User-facing strings are zh-TW** — UI copy, `HTTPException` detail messages, and backend `print()` output. Code comments are English.
+- `python/` and `bin/` at the repo root are a **vendored Windows runtime + FFmpeg** (gitignored, not part of the source). Ignore them when searching; they will otherwise flood results with `site-packages`.
+- Comments in this codebase explain *why* (a constraint, a failure mode that was hit), not *what*. Match that.

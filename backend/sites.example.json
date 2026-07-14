@@ -2,7 +2,7 @@
   "id": "example",
   "name": "Example Site",
   "display_domain": "example.com",
-  "_comment": "Adapter schema. Copy this into backend/sites/<yoursite>.json and fill in selectors for the site you want to read. Files in backend/sites/ are gitignored and never shipped.",
+  "_comment": "Adapter schema. Copy this into backend/sites/<yoursite>.json and fill in selectors for the site you want to read. Adapters in backend/sites/ are tracked in git, ship with releases, and update via git pull; you can add your own alongside them.",
   "domains": [
     "example.com"
   ],
