@@ -53,7 +53,7 @@ export function isMacPlatform(): boolean {
 export function defaultSettings(mac: boolean = isMacPlatform()): Settings {
   return {
     nickname: "",
-    awakeEnabled: true,
+    awakeEnabled: false,
     awakeHotkey: mac
       ? { key: "x", meta: true, ctrl: false, alt: false, shift: false }
       : { key: "x", meta: false, ctrl: false, alt: true, shift: false },

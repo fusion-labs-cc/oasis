@@ -37,12 +37,62 @@ export default function AwakeMode() {
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
 
+  const lastTap = useRef<number>(0);
+  const touchTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const handleTouchStart = () => {
+    // Set a timer for long-press (e.g. 1 second)
+    touchTimeout.current = setTimeout(() => {
+      setActive(false);
+    }, 1000);
+  };
+
+  const handleTouchMove = () => {
+    // If they drag/scroll, cancel the long press
+    if (touchTimeout.current) {
+      clearTimeout(touchTimeout.current);
+      touchTimeout.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    // Cancel the long-press timer if it hasn't fired yet
+    if (touchTimeout.current) {
+      clearTimeout(touchTimeout.current);
+      touchTimeout.current = null;
+    }
+
+    // Double tap detection
+    const now = Date.now();
+    if (now - lastTap.current < 300) {
+      setActive(false);
+    }
+    lastTap.current = now;
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (touchTimeout.current) {
+        clearTimeout(touchTimeout.current);
+      }
+    };
+  }, []);
+
   // Restore the disguise after a refresh, tab close/reopen, or navigating away
   // and back. We read localStorage in an effect (not during render) so the
   // server-rendered markup and the first client render agree, avoiding a
   // hydration mismatch.
   useEffect(() => {
-    if (localStorage.getItem(STORAGE_KEY) === "1") setActive(true);
+    // Avoid auto-restoring on mobile/tablet devices to prevent getting locked out.
+    const isMobileTablet = typeof window !== "undefined" && typeof navigator !== "undefined" && (
+      /mobi|android|iphone|ipad|tablet/.test(navigator.userAgent.toLowerCase()) ||
+      (("ontouchstart" in window || navigator.maxTouchPoints > 0) && /mac/.test(navigator.userAgent.toLowerCase()))
+    );
+
+    if (!isMobileTablet && localStorage.getItem(STORAGE_KEY) === "1") {
+      setActive(true);
+    }
   }, []);
 
   // Persist every change so the state survives a full reload.
@@ -138,6 +188,10 @@ export default function AwakeMode() {
       setAiMode(false);
       setShowSuggestions(false);
       setShowSettings(false);
+      if (touchTimeout.current) {
+        clearTimeout(touchTimeout.current);
+        touchTimeout.current = null;
+      }
     };
   }, [active]);
 
@@ -207,7 +261,13 @@ export default function AwakeMode() {
       {/* Main */}
       <main className="-mt-16 flex flex-grow flex-col items-center justify-center px-4">
         {/* Logo / AI greeting */}
-        <div className="relative mb-8 flex h-28 items-center justify-center">
+        <div
+          className="relative mb-8 flex h-28 items-center justify-center select-none"
+          onDoubleClick={() => setActive(false)}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+          onTouchMove={handleTouchMove}
+        >
           <div
             className={`transition-all duration-500 ${
               aiMode ? "scale-95 opacity-0" : "scale-100 opacity-100"

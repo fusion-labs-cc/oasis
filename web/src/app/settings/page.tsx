@@ -703,7 +703,7 @@ export default function SettingsPage() {
         </div>
         <Field
           title="啟用 Awake 模式"
-          description="一鍵將整個網站偽裝成 Google 首頁並暫停播放。關閉後將隱藏標頭按鈕並停用其快速鍵。"
+          description="一鍵將整個網站偽裝成 Google 首頁並暫停播放。關閉後將隱藏標頭按鈕並停用其快速鍵。（在行動裝置/平板上，可雙擊或長按 Google 標誌以解除偽裝）"
         >
           <button
             type="button"
