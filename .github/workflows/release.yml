@@ -163,6 +163,15 @@ jobs:
           python scripts/app_payload.py --build app --version "$GITHUB_REF_NAME"
           (cd app && zip -qr ../oasis-app.zip .)
 
+      # The browser extension is pure static assets — no per-OS build — so it
+      # ships as one OS-independent zip (like oasis-app.zip above), never bundled
+      # into the win64/macOS backend installs, whose bytes it would only
+      # duplicate. manifest.json sits at the zip root, which is what Chrome wants
+      # for "Load unpacked" / Web Store upload. Its version is independent of the
+      # tag (it lives in chrome-extension/manifest.json).
+      - name: Zip the browser extension
+        run: (cd chrome-extension && zip -qr ../oasis-extension.zip . -x '*.DS_Store')
+
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -180,4 +189,5 @@ jobs:
           files: |
             artifacts/**/*.zip
             oasis-app.zip
+            oasis-extension.zip
           generate_release_notes: true
