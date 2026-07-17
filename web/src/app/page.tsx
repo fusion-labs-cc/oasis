@@ -393,6 +393,12 @@ export default function Home() {
           </div>
         )}
 
+        {/* The welcome hero above already lists the sites; once a lastWatched
+            hero replaces it, keep the list visible as a slim strip below. */}
+        {lastWatched && (
+          <SupportedSites label="支援解析下載的網站" className="-mt-4 mb-8 px-1" />
+        )}
+
         {error && (
           <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-xs text-red-400 font-sans">
             載入資料庫出錯：{error}
