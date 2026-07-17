@@ -30,7 +30,7 @@ pyinstaller --noconfirm oasis-backend.spec                      # → dist/oasis
 python scripts/app_payload.py --build dist/oasis-backend/app --version v0.1.0   # → the source it runs
 ```
 
-Must be built **on the target OS** (PyInstaller cannot cross-compile). Releasing is `git tag v0.1.0 && git push origin v0.1.0`, which triggers `.github/workflows/release.yml` to build Windows + macOS-arm64, bundle FFmpeg, and publish both full zips plus `oasis-app.zip`.
+Must be built **on the target OS** (PyInstaller cannot cross-compile). Releasing is `git tag v0.1.0 && git push origin v0.1.0`, which triggers `.github/workflows/release.yml` to build Windows + macOS-arm64, bundle FFmpeg, and publish both full zips plus `oasis-backend-patch.zip`.
 
 **There are no tests** — no pytest, no jest/vitest, no test files anywhere in `backend/` or `web/src/`. Verify changes by exercising the running app, not by running a suite.
 
@@ -130,12 +130,12 @@ Two stamps, and *where* each lives is the design:
 
 `updater.py` (frozen build only) therefore has **two paths**, chosen by comparing the release's `RUNTIME` against the running build's:
 
-- **Light — almost always.** Same `RUNTIME` ⇒ the new source runs on the `.exe` already installed. Download `oasis-app.zip` (~35 KB), stage it in `.oasis-update/pending-app`, relaunch **itself**, exit; the fresh process swaps `app/` in *before importing anything from it* (`_apply_pending_update`). Nothing that gets replaced is a file the OS has open, so there is no locked-file problem, no helper script, and no rollback to get right.
+- **Light — almost always.** Same `RUNTIME` ⇒ the new source runs on the `.exe` already installed. Download `oasis-backend-patch.zip` (~35 KB), stage it in `.oasis-update/pending-app`, relaunch **itself**, exit; the fresh process swaps `app/` in *before importing anything from it* (`_apply_pending_update`). Nothing that gets replaced is a file the OS has open, so there is no locked-file problem, no helper script, and no rollback to get right.
 - **Full — only when `RUNTIME` differs** (a dependency was added, Python bumped). Download the OS's full zip and hand off to a detached OS-native helper (sh / PowerShell) that kills this backend, swaps every top-level entry, and relaunches. This path exists solely because **a running process cannot overwrite its own executable or loaded libraries** — hence the all-or-nothing rename-aside-then-install-with-rollback dance, and hence the backend never exiting on its own here. It is also why `DETACHED_PROCESS` must not be used to spawn the helper (PowerShell exits instantly without a console; use `CREATE_NO_WINDOW`).
 
 A light update that can't be applied changes **nothing on disk** and falls back to the full path; a full update that fails rolls back and relaunches the old build. `oasis.db`, `movies/` and `sites/` are outside both payloads and are always preserved. Updates span multiple processes, so every step is logged to `.oasis-update/`, which no payload touches — `/api/update/logs` reads it back, and that is how a silently failed update gets diagnosed.
 
-Releasing is `git tag v0.1.0 && git push origin v0.1.0`. CI publishes three assets: the two full installs, plus the OS-independent **`oasis-app.zip`** that the light path consumes.
+Releasing is `git tag v0.1.0 && git push origin v0.1.0`. CI publishes three assets: the two full installs, plus the OS-independent **`oasis-backend-patch.zip`** that the light path consumes.
 
 ### Frontend state
 

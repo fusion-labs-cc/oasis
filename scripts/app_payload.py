@@ -8,7 +8,7 @@ backend's own source runs from `app/` next to it as plain .py files. That folder
 is what this script builds, and it is both:
 
   * shipped inside every full install (dist/oasis-backend/app/), and
-  * published on its own as oasis-app.zip — the payload of a light update, which
+  * published on its own as oasis-backend-patch.zip — the payload of a light update, which
     is why a normal release is a ~35 KB download that replaces no locked file.
 
 Used by .github/workflows/release.yml in three jobs (windows, macos, release), so

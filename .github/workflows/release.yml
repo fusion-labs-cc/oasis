@@ -53,7 +53,7 @@ jobs:
         run: pyinstaller --noconfirm oasis-backend.spec
 
       # The backend's source is NOT inside the .exe — it ships next to it, and is
-      # imported from there at runtime. Same payload as oasis-app.zip below.
+      # imported from there at runtime. Same payload as oasis-backend-patch.zip below.
       - name: Assemble the app payload
         shell: bash
         run: python scripts/app_payload.py --build dist/oasis-backend/app --version "$GITHUB_REF_NAME"
@@ -161,10 +161,10 @@ jobs:
       - name: Build the source-only update payload
         run: |
           python scripts/app_payload.py --build app --version "$GITHUB_REF_NAME"
-          (cd app && zip -qr ../oasis-app.zip .)
+          (cd app && zip -qr ../oasis-backend-patch.zip .)
 
       # The browser extension is pure static assets — no per-OS build — so it
-      # ships as one OS-independent zip (like oasis-app.zip above), never bundled
+      # ships as one OS-independent zip (like oasis-backend-patch.zip above), never bundled
       # into the win64/macOS backend installs, whose bytes it would only
       # duplicate. manifest.json sits at the zip root, which is what Chrome wants
       # for "Load unpacked" / Web Store upload. Its version is independent of the
@@ -188,6 +188,6 @@ jobs:
         with:
           files: |
             artifacts/**/*.zip
-            oasis-app.zip
+            oasis-backend-patch.zip
             oasis-chrome-extension.zip
           generate_release_notes: true

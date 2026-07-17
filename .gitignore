@@ -25,7 +25,7 @@ chromedriver*
 /build/
 /dist/
 /oasis-backend-*.zip
-/oasis-app.zip
+/oasis-backend-patch.zip
 # Build-time stamps: the git tag, the release asset for this OS, and the
 # fingerprint of the frozen runtime (see release.yml, scripts/app_payload.py).
 /VERSION

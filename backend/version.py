@@ -35,7 +35,7 @@ GITHUB_REPO = "fusion-labs-cc/oasis"
 
 # The OS-independent release asset holding just the backend source: the payload of
 # a light update. Carries its own VERSION and the RUNTIME it was built against.
-APP_ASSET_NAME = "oasis-app.zip"
+APP_ASSET_NAME = "oasis-backend-patch.zip"
 
 # Fallback map from sys.platform to the full-install release asset name, used only
 # when the build carries no PLATFORM stamp (source checkout, or a build made
