@@ -1,0 +1,199 @@
+/* Design language mirrors the Oasis website (web/src/app/globals.css):
+   dark surfaces, emerald accent, hairline borders, Inter/system-ui. */
+:root {
+  --background: #0f1211;
+  --surface-elevated: #16191a;
+  --surface-highest: #1c2021;
+  --accent: #10b981;
+  --accent-hover: #34d399;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --hairline: rgba(255, 255, 255, 0.05);
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  padding: 0;
+  background: var(--background);
+  color: var(--text-primary);
+  font: 13px/1.5 Inter, system-ui, -apple-system, sans-serif;
+}
+
+/* Custom scrollbar, matching the site. */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(16, 185, 129, 0.3); }
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: rgba(15, 18, 17, 0.8);
+  backdrop-filter: blur(12px);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+  color: inherit;
+}
+.brand:hover h1 { color: var(--accent-hover); }
+
+.logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  flex: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Primary (accent) button — Oasis: rounded-lg, bold, dark text, emerald glow. */
+button {
+  font: inherit;
+  cursor: pointer;
+  font-weight: 700;
+  border: none;
+  background: var(--accent);
+  color: #0a0a0a;
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: background 0.2s, transform 0.1s, color 0.2s, border-color 0.2s;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.2);
+}
+button:hover { background: var(--accent-hover); }
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.5; cursor: default; box-shadow: none; }
+
+/* Icon button — Oasis header control: bordered elevated surface, no glow. */
+button.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  width: 34px;
+  padding: 0;
+  background: var(--surface-elevated);
+  border: 1px solid var(--hairline);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+button.icon-btn:hover {
+  background: var(--surface-highest);
+  color: var(--text-primary);
+}
+
+.status {
+  margin: 0;
+  padding: 10px 16px 0;
+  color: var(--text-secondary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 16px 14px;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+.item:hover {
+  border-color: rgba(16, 185, 129, 0.3);
+  box-shadow: 0 8px 20px -8px rgba(16, 185, 129, 0.08);
+}
+
+.item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.item a {
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+  /* Clamp the title to at most 2 lines with an ellipsis. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.item a:hover { color: var(--accent-hover); }
+
+.item time {
+  display: block;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* Delete — quiet, bordered, only warms up on hover. */
+.remove {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--text-tertiary);
+  font-weight: 600;
+  padding: 3px 9px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+.empty {
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 40px 16px;
+}
+
+.site-footer {
+  border-top: 1px solid var(--hairline);
+  padding: 10px 16px;
+  text-align: center;
+}
+.site-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-tertiary);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 0.2s;
+}
+.site-footer a:hover { color: var(--accent-hover); }
