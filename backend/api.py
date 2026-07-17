@@ -17,7 +17,7 @@ import sys
 import asyncio
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -188,6 +188,7 @@ def _init_db():
         print('   若要用手機看片，請在「設定 → 遠端存取」開啟遠端存取。')
     _resume_pending_downloads()
     asyncio.create_task(_bg_check_analyses())
+    asyncio.create_task(_backfill_covers())
 
 
 @app.on_event('shutdown')
@@ -219,6 +220,44 @@ def _cleanup_processes():
             proc.terminate()
             proc.join()
     active_downloads.clear()
+
+
+async def _backfill_covers():
+    """Cache the real cover image for every row that still holds only its origin
+    URL. Covers were originally stored as a bare URL; this fills in the actual
+    bytes for pre-existing (and manually added / imported) rows so they survive a
+    dead or hotlink-protected origin, exactly like freshly analysed ones.
+
+    Runs once per start, in the background and one image at a time off the event
+    loop (fetch_cover_image blocks on the network). A row whose fetch fails just
+    stays uncached and is retried on the next start — or lazily when first
+    viewed — so a permanently dead origin costs nothing beyond one attempt."""
+    try:
+        todo = catalog.get_covers_needing_backfill()
+    except Exception as e:
+        print(f'⚠️ 封面補抓查詢失敗: {e}')
+        return
+    if not todo:
+        return
+    print(f'🖼  發現 {len(todo)} 張封面尚未存檔，開始補抓...')
+    loop = asyncio.get_running_loop()
+    done = 0
+    for video_id, cover_url, page_url in todo:
+        try:
+            fetched = await loop.run_in_executor(
+                None, catalog.fetch_cover_image, cover_url, page_url
+            )
+            if fetched:
+                data, mime = fetched
+                await loop.run_in_executor(
+                    None, catalog.store_cover_image, video_id, data, mime
+                )
+                done += 1
+        except Exception:
+            pass  # best-effort; a failed row is retried next start / on view
+        # Be gentle on the origin CDN and keep the event loop responsive.
+        await asyncio.sleep(0.3)
+    print(f'✅ 封面補抓完成：{done}/{len(todo)} 已存入資料庫')
 
 
 def _resume_pending_downloads():
@@ -1044,6 +1083,18 @@ def update_details(video_id: int, body: DetailsUpdate):
         raise HTTPException(status_code=400, detail=str(e))
     if record is None:
         raise HTTPException(status_code=404, detail='影片不存在')
+
+    # A changed cover URL clears the cached bytes (has_cover flips false); fetch
+    # the new image right away so the detail page shows it immediately instead of
+    # waiting for the next view. Best-effort — a failed fetch just leaves it
+    # uncached (retried lazily / by the startup backfill), the edit itself stands.
+    if record.get('cover') and not record.get('has_cover'):
+        fetched = catalog.fetch_cover_image(record['cover'], referer=record.get('url'))
+        if fetched:
+            data, mime = fetched
+            catalog.store_cover_image(video_id, data, mime)
+            record = catalog.get_video_by_id(video_id)
+
     return _enrich_record(record, with_size=True)
 
 
@@ -1119,6 +1170,39 @@ def get_video(video_id: int):
     if not record:
         raise HTTPException(status_code=404, detail='影片不存在')
     return _enrich_record(record, with_size=True)
+
+
+@app.get('/api/stream/cover/{video_id}')
+def stream_cover(video_id: int):
+    """Serve a video's cover image straight from the DB.
+
+    Lives under /api/stream so an <img src> — which can attach no custom header —
+    is exempt from the client-header CSRF guard and carries the code as ?token=
+    instead, exactly like video streaming. The bytes are cached in the DB on
+    first request: a row that only has the origin URL is fetched once, stored,
+    and thereafter served locally, so a dead or hotlink-protected origin never
+    blanks a cover and the browser stops touching the origin CDN at all."""
+    src = catalog.get_cover_source(video_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail='影片不存在')
+
+    data, mime = src['data'], src['mime']
+    if data is None and src['cover_url']:
+        fetched = catalog.fetch_cover_image(src['cover_url'], referer=src['page_url'])
+        if fetched:
+            data, mime = fetched
+            catalog.store_cover_image(video_id, data, mime)
+
+    if data is None:
+        raise HTTPException(status_code=404, detail='封面不存在')
+
+    return Response(
+        content=bytes(data),
+        media_type=mime or 'image/jpeg',
+        # Bytes are immutable once cached (editing the cover URL clears them), so
+        # let the browser cache aggressively instead of re-hitting the backend.
+        headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+    )
 
 
 @app.get('/api/stream/{video_id}')

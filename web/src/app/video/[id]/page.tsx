@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl } from "@/lib/api";
+import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
@@ -562,7 +562,7 @@ export default function VideoDetailPage() {
               onPlay={handlePlay}
               className="mx-auto w-full aspect-video max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] outline-none"
               src={streamUrl(video.id!)}
-              poster={video.cover || undefined}
+              poster={coverUrl(video) || undefined}
             >
               您的瀏覽器不支援影片播放。
             </video>
@@ -572,17 +572,17 @@ export default function VideoDetailPage() {
 
       {(!video.video_path || !video.local_file_exists) && (
         <div className="relative mx-auto aspect-video w-full max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
-          {video.cover && (
+          {coverUrl(video) && (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={video.cover}
+                src={coverUrl(video)!}
                 alt={video.code}
                 className="absolute inset-0 h-full w-full object-cover blur-md opacity-15 scale-105"
               />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={video.cover}
+                src={coverUrl(video)!}
                 alt={video.code}
                 className="relative z-10 max-h-[60%] max-w-[80%] rounded-xl object-contain border border-border-hairline shadow-2xl mb-6"
               />

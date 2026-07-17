@@ -11,7 +11,11 @@ export interface VideoRecord {
   title_zh_tw?: string | null;
   actress?: string | null;
   tags: string[];
+  // `cover` is the origin image URL (kept for editing/re-fetching). `has_cover`
+  // is true once the backend has cached the actual image bytes — prefer
+  // coverUrl(), which serves those from the local backend.
   cover?: string | null;
+  has_cover?: boolean;
   video_path?: string | null;
   created_at?: string;
   is_downloading?: boolean;
@@ -76,6 +80,21 @@ export function streamUrl(videoId: number): string {
   const code = getAccessCode();
   const query = code ? `?token=${encodeURIComponent(code)}` : "";
   return backendUrl(`/api/stream/${videoId}${query}`);
+}
+
+// The URL to display a video's cover in an <img>/poster. Prefer the backend's
+// cached copy (served locally, survives a dead origin, and — like streaming —
+// carries the code as ?token= since <img> can send no header); the endpoint
+// lazily fetches + caches the origin bytes on first view. Falls back to the raw
+// origin URL only when there is no id to address it by, and null when there is
+// no cover at all.
+export function coverUrl(video: VideoRecord): string | null {
+  if (video.id != null && (video.has_cover || video.cover)) {
+    const code = getAccessCode();
+    const query = code ? `?token=${encodeURIComponent(code)}` : "";
+    return backendUrl(`/api/stream/cover/${video.id}${query}`);
+  }
+  return video.cover || null;
 }
 
 // Allow only http(s) URLs into an anchor href. A video's `url` is user/scrape

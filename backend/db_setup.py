@@ -47,6 +47,19 @@ def create_tables():
         conn.execute("ALTER TABLE videos ADD COLUMN download_pending INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # Column already exists
+    # Cache the actual cover image bytes, not just its origin URL. `cover` still
+    # holds the source URL (kept for editing/re-fetching); cover_image is the
+    # image itself so a dead or hotlink-protected origin never blanks a cover,
+    # and cover_type is its MIME so it can be served with the right Content-Type.
+    # Populated lazily on first view (see /api/stream/cover). Safe migration.
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN cover_image BLOB")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE videos ADD COLUMN cover_type TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.commit()
     conn.close()
     print(f'✅ 資料庫已初始化: {DB_PATH}')

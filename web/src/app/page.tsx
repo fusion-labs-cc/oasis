@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { computeFacets, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord } from "@/lib/api";
+import { computeFacets, coverUrl, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
@@ -360,12 +360,12 @@ export default function Home() {
             </div>
 
             {/* Right side: Cover Preview */}
-            {lastWatched.video.cover && (
+            {coverUrl(lastWatched.video) && (
               <div className="relative h-28 md:h-36 aspect-video rounded-xl overflow-hidden border border-border-hairline group/hero-cover shrink-0 shadow-lg">
                 <Link href={`/video/${lastWatched.video.id}`} className="block w-full h-full">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img 
-                    src={lastWatched.video.cover} 
+                  <img
+                    src={coverUrl(lastWatched.video)!}
                     alt={lastWatched.video.code}
                     className="w-full h-full object-cover transition-transform duration-500 group-hover/hero-cover:scale-105"
                   />
@@ -896,10 +896,10 @@ function VideoCard({
         </>
       )}
       <Link href={`/video/${video.id}`} className="block relative aspect-video w-full overflow-hidden bg-surface-highest">
-        {video.cover ? (
+        {coverUrl(video) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={video.cover}
+            src={coverUrl(video)!}
             alt={video.code}
             className="aspect-video w-full object-cover transition-transform duration-500 group-hover:scale-105"
             loading="lazy"

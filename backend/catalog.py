@@ -175,9 +175,22 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+# Columns returned to the API/UI. Deliberately excludes the cover_image BLOB:
+# a `SELECT *` would pull every cover's bytes into memory on a full-catalog list.
+# `has_cover` exposes only *whether* an image is cached; the bytes are served
+# separately by /api/stream/cover.
+_VIDEO_COLUMNS = (
+    "id, code, url, title, title_zh_tw, actress, tags, cover, video_path, "
+    "created_at, play_count, download_pending, "
+    "(cover_image IS NOT NULL) AS has_cover"
+)
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict:
     d = dict(row)
     d['tags'] = json.loads(d['tags'] or '[]')
+    if 'has_cover' in d:
+        d['has_cover'] = bool(d['has_cover'])
     return d
 
 
@@ -207,7 +220,7 @@ def list_all_videos():
     """List all videos in the catalog."""
     conn = get_connection()
     rows = [_row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM videos ORDER BY created_at DESC"
+        f"SELECT {_VIDEO_COLUMNS} FROM videos ORDER BY created_at DESC"
     )]
     conn.close()
     return rows
@@ -216,7 +229,7 @@ def list_all_videos():
 def search_by_code(code: str):
     conn = get_connection()
     rows = [_row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM videos WHERE code = ?", (code.upper(),)
+        f"SELECT {_VIDEO_COLUMNS} FROM videos WHERE code = ?", (code.upper(),)
     )]
     conn.close()
     return rows
@@ -224,7 +237,7 @@ def search_by_code(code: str):
 
 def get_video_by_id(video_id: int):
     conn = get_connection()
-    row = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    row = conn.execute(f"SELECT {_VIDEO_COLUMNS} FROM videos WHERE id = ?", (video_id,)).fetchone()
     conn.close()
     if row:
         return _row_to_dict(row)
@@ -349,7 +362,13 @@ def update_video_details(video_id: int, code=None, title=None, actress=None, url
         updates['url'] = url
 
     if cover is not None:
-        updates['cover'] = (cover or '').strip() or None
+        new_cover = (cover or '').strip() or None
+        # Drop the cached bytes whenever the source URL changes so the next view
+        # re-fetches from the new URL instead of serving the old image.
+        if new_cover != (row.get('cover') or None):
+            updates['cover'] = new_cover
+            updates['cover_image'] = None
+            updates['cover_type'] = None
 
     if not updates:
         return row
@@ -383,6 +402,98 @@ def increment_play_count(video_id: int):
     if not updated or row is None:
         return None
     return row['play_count']
+
+
+# -- Cover images ---------------------------------------------------------------
+
+# Refuse to buffer an unbounded response body into the DB. Covers are small
+# posters; anything larger is almost certainly not a cover.
+_COVER_MAX_BYTES = 15 * 1024 * 1024
+
+
+def fetch_cover_image(url: str, referer: str | None = None) -> tuple[bytes, str] | None:
+    """Download a cover image's raw bytes + MIME type from its origin URL.
+
+    Best-effort: returns None on any failure, a non-image response, or an
+    oversized body, so a dead or hotlink-protected origin simply leaves the
+    cover uncached rather than raising. `referer` is the video's page URL —
+    some sites hotlink-protect covers and reject a request without it.
+    """
+    url = (url or '').strip()
+    if not url.lower().startswith(('http://', 'https://')):
+        return None
+    try:
+        import requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                          'AppleWebKit/537.36 (KHTML, like Gecko) '
+                          'Chrome/120.0.0.0 Safari/537.36',
+        }
+        if referer:
+            headers['Referer'] = referer
+        resp = requests.get(url, headers=headers, timeout=15, stream=True)
+        resp.raise_for_status()
+        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        if not ctype.startswith('image/'):
+            return None
+        data = bytearray()
+        for chunk in resp.iter_content(64 * 1024):
+            data.extend(chunk)
+            if len(data) > _COVER_MAX_BYTES:
+                return None
+        if not data:
+            return None
+        return bytes(data), ctype
+    except Exception:
+        return None
+
+
+def store_cover_image(video_id: int, data: bytes, mime: str):
+    """Persist the fetched cover bytes + MIME for a video."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE videos SET cover_image = ?, cover_type = ? WHERE id = ?",
+        (sqlite3.Binary(data), mime, video_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_cover_source(video_id: int) -> dict | None:
+    """Return everything the cover endpoint needs to serve (or lazily fetch) a
+    cover: the cached bytes/MIME if present, plus the origin cover URL and the
+    page URL (used as the Referer when fetching). None if the video is gone."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT cover_image, cover_type, cover, url FROM videos WHERE id = ?",
+        (video_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {
+        'data': row['cover_image'],
+        'mime': row['cover_type'],
+        'cover_url': row['cover'],
+        'page_url': row['url'],
+    }
+
+
+def get_covers_needing_backfill() -> list[tuple[int, str, str]]:
+    """Return (id, cover_url, page_url) for every row that carries an origin
+    cover URL but no cached image yet.
+
+    Drives the startup backfill: entries created before covers were stored (and
+    every manual/import entry, which only carries the URL) get their real image
+    fetched proactively, instead of waiting to be viewed."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, cover, url FROM videos "
+        "WHERE cover_image IS NULL AND cover IS NOT NULL AND cover != '' "
+        "ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return [(r['id'], r['cover'], r['url']) for r in rows]
 
 
 # -- Video title fetching (lightweight, no download) ----------------------------
