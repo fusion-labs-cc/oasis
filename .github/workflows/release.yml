@@ -170,7 +170,7 @@ jobs:
       # for "Load unpacked" / Web Store upload. Its version is independent of the
       # tag (it lives in chrome-extension/manifest.json).
       - name: Zip the browser extension
-        run: (cd chrome-extension && zip -qr ../oasis-extension.zip . -x '*.DS_Store')
+        run: (cd chrome-extension && zip -qr ../oasis-chrome-extension.zip . -x '*.DS_Store')
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -189,5 +189,5 @@ jobs:
           files: |
             artifacts/**/*.zip
             oasis-app.zip
-            oasis-extension.zip
+            oasis-chrome-extension.zip
           generate_release_notes: true

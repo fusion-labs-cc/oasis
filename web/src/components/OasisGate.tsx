@@ -44,7 +44,7 @@ const PORTAL_DOWNLOADS: { label: string; url: string }[] = [
 ].filter((d) => d.url);
 
 // The companion Chrome extension (chrome-extension/, shipped as the OS-independent
-// oasis-extension.zip). One link for every platform since the extension has no
+// oasis-chrome-extension.zip). One link for every platform since the extension has no
 // per-OS build. Unset → hidden, like the portal downloads. Inlined at build time.
 const EXTENSION_DOWNLOAD_URL = process.env.NEXT_PUBLIC_EXTENSION_DOWNLOAD_URL || "";
 

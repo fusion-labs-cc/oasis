@@ -8,7 +8,7 @@ saved URL with its creation date; click **Save current tab** to add the active p
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select this `oasis-extension/` folder.
+3. Click **Load unpacked** and select this `chrome-extension/` folder.
 
 ## Sharing data with incognito windows
 
