@@ -202,6 +202,12 @@ export default function OasisGate() {
     }
   }
 
+  function handleAccessCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 8);
+    const formatted = raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
+    setCodeDraft(formatted);
+  }
+
   // Adopt the scanned backend URL. There is no credential in the link, so this is
   // exactly the manual "enter the coordinates" path — the gate will then ask for
   // the access code, which the user reads off the backend's console.
@@ -383,7 +389,7 @@ export default function OasisGate() {
                 <input
                   type="password"
                   value={codeDraft}
-                  onChange={(e) => setCodeDraft(e.target.value)}
+                  onChange={handleAccessCodeChange}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") enterCode();
                   }}
