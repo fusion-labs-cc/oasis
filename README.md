@@ -92,7 +92,7 @@ chmod +x oasis-portal.sh
 - **macOS**：`oasis-backend` 沒有簽章，macOS 第一次執行前需要手動解除隔離標記，否則雙擊會被 Gatekeeper 擋下（顯示「無法確認開發者」）：
   1. 在 Finder 解壓縮後的資料夾內，滑鼠右鍵點空白處 →「服務」→「於資料夾建立終端機頁籤」（沒有這個選項的話，把資料夾直接拖到 Dock 上的「終端機」圖示也能在該路徑開啟終端機）。
   2. 在跳出的終端機視窗輸入：`xattr -cr .` 並按 Enter（只需執行一次）。
-  3. 之後就可以直接雙擊 `oasis-backend` 啟動後端。
+  3. 之後雙擊 `oasis-backend.command` 啟動後端（直接雙擊 `oasis-backend` 也能用，只是少了 Chrome 偵測提示）。
 
 後端啟動後，直接開啟上面的網站即可，它會自動連到你電腦上 `http://localhost:8000` 的後端。
 

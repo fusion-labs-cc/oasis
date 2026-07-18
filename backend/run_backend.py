@@ -240,9 +240,11 @@ def main() -> None:
     import uvicorn
     from api import app as fastapi_app
 
-    print(f'==> OASIS backend serving on http://{host}:{port}')
-    print(f'    data dir: {base}')
-    print(f'    app  dir: {app}')
+    # The "ready" banner lives in api.py's startup hook, not here: this print
+    # would fire before uvicorn has even bound the socket, so it's a promise,
+    # not a fact. Printing it once, from the one place that's actually true on
+    # both platforms, is what keeps Windows (raw console) and macOS (Terminal
+    # via oasis-backend.command) showing identical, correct text.
     uvicorn.run(fastapi_app, host=host, port=port)
 
 

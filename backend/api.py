@@ -180,6 +180,32 @@ async def require_auth(request: Request, call_next):
 @app.on_event('startup')
 def _init_db():
     """Ensure the SQLite database and tables exist (safe to call repeatedly)."""
+    # Single source of truth for the "server is up" banner: this hook is the one
+    # point in the code that is (a) guaranteed to run after uvicorn has actually
+    # bound the socket, not just attempted to, and (b) identical on every
+    # platform, since Windows shows this process's raw stdout in its own
+    # auto-opened console and macOS shows it inherited into the Terminal window
+    # scripts/oasis-backend.command opens. Edit this, not a platform launcher.
+    #
+    # Most people double-clicking this have no idea what "backend" or "server"
+    # means, so the headline is an instruction ("open this website"), not a
+    # status report -- the technical host/port/dir facts are demoted to a
+    # second block for support/debugging, not what the user is meant to read.
+    host = os.environ.get('HOST', '127.0.0.1')
+    port = os.environ.get('PORT', '8000')
+    print('')
+    print('======================================================')
+    print('  ✅ Oasis 已經準備好了！')
+    print('')
+    print('  請打開瀏覽器，前往：https://oasis.fusion-labs.cc')
+    print('  這個視窗請保持開啟——關閉視窗會讓播放和下載功能一起停止。')
+    print('======================================================')
+    print('')
+    print(f'(技術資訊 / for support：serving on http://{host}:{port}, data dir: {MEDIA_ROOT}', end='')
+    app_dir = os.environ.get('OASIS_APP_DIR')
+    if app_dir:
+        print(f', app dir: {app_dir}', end='')
+    print(')')
     db_setup.create_tables()
     # The console is the only place the code is ever shown, so print it on every
     # start: that is where the user goes to read it off.

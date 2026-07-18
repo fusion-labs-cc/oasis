@@ -125,6 +125,13 @@ jobs:
           lic="$(find ffmpeg_extracted -iname 'LICENSE*' -o -iname 'GPL*' | head -1)"
           if [ -n "$lic" ]; then cp "$lic" "$bin/ffmpeg-LICENSE.txt"; fi
 
+      # See the header comment in the script itself for why this needs the
+      # xattr step below rather than trying to dodge Gatekeeper on its own.
+      - name: Bundle the double-click launcher
+        run: |
+          cp scripts/oasis-backend.command dist/oasis-backend/
+          chmod +x dist/oasis-backend/oasis-backend.command
+
       # `oasis-backend` ships unsigned, so a fresh download is quarantined and
       # Gatekeeper blocks the double-click until `xattr -cr` runs once. Putting
       # that step in the zip itself means a user hits it before they've even
@@ -151,7 +158,8 @@ jobs:
             '' \
             '   xattr -cr .' \
             '' \
-            '3. 之後就可以直接雙擊 oasis-backend 啟動後端。' \
+            '3. 之後雙擊 oasis-backend.command 啟動後端。' \
+            '   （直接雙擊 oasis-backend 也還是能用，只是少了 Chrome 偵測提示。）' \
             '' \
             '後端啟動後，直接開啟 https://oasis.fusion-labs.cc，' \
             '它會自動連到你電腦上 http://localhost:8000 的後端。' \
