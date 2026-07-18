@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { computeFacets, coverUrl, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
@@ -20,6 +20,8 @@ export default function Home() {
   const [selectedActress, setSelectedActress] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [match, setMatch] = useState<"all" | "any">("all");
+  // Keyword search, driven by the Header's search bar via custom event.
+  const [searchKeyword, setSearchKeyword] = useState("");
   // Mobile-only collapsible for the filter panel — the sidebar is xl-only.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -120,9 +122,12 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const facets = useMemo(() => computeFacets(allVideos), [allVideos]);
 
   const videos = useMemo(() => {
+    const kw = searchKeyword.trim().toLowerCase();
     return allVideos.filter((v) => {
       if (selectedActress && v.actress !== selectedActress) return false;
       if (selectedTags.length) {
@@ -133,9 +138,23 @@ export default function Home() {
             : selectedTags.every((t) => tags.has(t));
         if (!ok) return false;
       }
+      // Keyword search: match against code, title (both languages), actress, tags.
+      if (kw) {
+        const haystack = [
+          v.code,
+          v.title,
+          v.title_zh_tw,
+          v.actress,
+          ...(v.tags ?? []),
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(kw)) return false;
+      }
       return true;
     });
-  }, [allVideos, selectedActress, selectedTags, match]);
+  }, [allVideos, selectedActress, selectedTags, match, searchKeyword]);
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -150,9 +169,10 @@ export default function Home() {
   function clearFilters() {
     setSelectedActress(null);
     setSelectedTags([]);
+    setSearchKeyword("");
   }
 
-  const hasFilters = selectedActress !== null || selectedTags.length > 0;
+  const hasFilters = selectedActress !== null || selectedTags.length > 0 || searchKeyword.trim().length > 0;
 
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -411,7 +431,7 @@ export default function Home() {
                 ({hasFilters ? `${videos.length} / ${allVideos.length}` : allVideos.length})
               </span>
             </h2>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {hasFilters && (
                 <button
                   type="button"
@@ -453,6 +473,44 @@ export default function Home() {
                   {selectMode ? "完成選取" : "選取"}
                 </button>
               )}
+
+              {/* Inline search bar */}
+              <div className="relative flex items-center">
+                <svg
+                  className="absolute left-2.5 h-3.5 w-3.5 text-text-tertiary pointer-events-none"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  ref={searchInputRef}
+                  id="database-search"
+                  type="text"
+                  value={searchKeyword}
+                  onChange={(e) => setSearchKeyword(e.target.value)}
+                  placeholder="搜尋番號、女優、標題、標籤…"
+                  className="h-8 w-36 sm:w-48 md:w-56 rounded-lg border border-border-hairline bg-surface-elevated pl-8 pr-7 text-xs text-text-primary placeholder:text-text-tertiary focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30 transition"
+                />
+                {searchKeyword && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchKeyword("")}
+                    className="absolute right-2 flex items-center justify-center h-4 w-4 rounded-full bg-surface-highest text-text-tertiary hover:text-text-primary transition cursor-pointer"
+                    title="清除搜尋"
+                  >
+                    <svg className="h-2.5 w-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
