@@ -321,7 +321,7 @@ export default function OasisGate() {
                 />
                 偵測到入口座標
               </div>
-              <p className="mb-3 text-left text-[11px] leading-relaxed text-white/40">
+              <p className="mb-3 text-left text-xs leading-relaxed text-white/40">
                 要將這台裝置連線到以下綠洲嗎？只有在這是你自己的入口座標時才繼續。連線後仍需輸入存取碼。
               </p>
               <code className="mb-4 block w-full truncate rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 text-left font-mono text-xs text-white/80">
@@ -376,7 +376,7 @@ export default function OasisGate() {
                 />
                 需要存取碼
               </div>
-              <label className="mb-2 block text-left text-[10px] font-semibold uppercase tracking-[0.3em] text-white/35">
+              <label className="mb-2 block text-left text-xs font-semibold uppercase tracking-[0.3em] text-white/35">
                 存取碼
               </label>
               <div className="flex gap-2">
@@ -402,18 +402,18 @@ export default function OasisGate() {
                 </button>
               </div>
               {authError ? (
-                <p className="mt-3 text-left text-[11px] leading-relaxed text-[#ff8fa3]">
+                <p className="mt-3 text-left text-xs leading-relaxed text-[#ff8fa3]">
                   {authError}
                 </p>
               ) : (
-                <p className="mt-3 text-left text-[11px] leading-relaxed text-white/30">
+                <p className="mt-3 text-left text-xs leading-relaxed text-white/30">
                   存取碼顯示在執行綠洲那台電腦的主控台視窗上。此裝置只需輸入一次。
                 </p>
               )}
               <button
                 type="button"
                 onClick={() => setEditingUrl(true)}
-                className="mt-2 text-[11px] text-white/30 underline underline-offset-2 transition hover:text-white/60"
+                className="mt-2 text-xs text-white/30 underline underline-offset-2 transition hover:text-white/60 cursor-pointer"
               >
                 改用其他入口座標
               </button>
@@ -429,14 +429,14 @@ export default function OasisGate() {
                 />
                 尚未開放遠端存取
               </div>
-              <p className="text-left text-[11px] leading-relaxed text-white/40">
+              <p className="text-left text-xs leading-relaxed text-white/40">
                 這座綠洲目前只接受本機連線。請到執行綠洲的那台電腦上開啟「設定 →
                 遠端存取」，打開開關後主控台會顯示存取碼，即可用這台裝置進入。
               </p>
               <button
                 type="button"
                 onClick={() => setEditingUrl(true)}
-                className="mt-3 text-[11px] text-white/30 underline underline-offset-2 transition hover:text-white/60"
+                className="mt-3 text-xs text-white/30 underline underline-offset-2 transition hover:text-white/60 cursor-pointer"
               >
                 改用其他入口座標
               </button>
@@ -450,7 +450,7 @@ export default function OasisGate() {
                 />
                 {downReason === "failed" ? "連線中斷 · 自動重新連線中…" : "連線中斷"}
               </div>
-              <label className="mb-2 block text-left text-[10px] font-semibold uppercase tracking-[0.3em] text-white/35">
+              <label className="mb-2 block text-left text-xs font-semibold uppercase tracking-[0.3em] text-white/35">
                 入口座標
               </label>
               <div className="flex gap-2">
@@ -475,7 +475,7 @@ export default function OasisGate() {
                   進入
                 </button>
               </div>
-              <p className="mt-3 text-left text-[11px] leading-relaxed text-white/30">
+              <p className="mt-3 text-left text-xs leading-relaxed text-white/30">
                 在你的裝置上啟動綠洲，再輸入入口座標以進入。
               </p>
             </div>
@@ -493,7 +493,7 @@ export default function OasisGate() {
       <div className="absolute inset-x-0 bottom-6 z-10 flex flex-col items-center gap-5 px-6">
         {status === "down" && (PORTAL_DOWNLOADS.length > 0 || EXTENSION_DOWNLOAD_URL) && (
           <div className="flex flex-col items-center gap-2">
-            <span className="text-[10px] tracking-[0.2em] text-white/25">
+            <span className="text-xs tracking-[0.2em] text-white/25">
               還沒有綠洲？下載入口程式與擴充功能
             </span>
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -503,7 +503,7 @@ export default function OasisGate() {
                   href={d.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
+                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
                 >
                   {d.label === "macOS" ? (
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
@@ -525,7 +525,7 @@ export default function OasisGate() {
                   href={EXTENSION_DOWNLOAD_URL}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
+                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-xs tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
                 >
                   <svg
                     viewBox="0 0 24 24"
@@ -548,7 +548,7 @@ export default function OasisGate() {
           </div>
         )}
 
-        <nav className="flex items-center gap-3 text-[10px] tracking-[0.15em] text-white/25">
+        <nav className="flex items-center gap-3 text-xs tracking-[0.15em] text-white/25">
           <Link href="/terms" className="transition hover:text-white/60">
             使用條款
           </Link>
