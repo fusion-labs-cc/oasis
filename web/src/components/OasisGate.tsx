@@ -640,6 +640,17 @@ export default function OasisGate() {
           >
             問題回饋
           </a>
+          <span aria-hidden className="text-white/15">
+            ·
+          </span>
+          <a
+            href="https://github.com/fusion-labs-cc/oasis"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition hover:text-white/60"
+          >
+            GitHub
+          </a>
         </nav>
       </div>
     </div>

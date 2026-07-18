@@ -16,6 +16,7 @@ const DEPS: { group: string; items: { name: string; license: string; href: strin
       { name: "React / React DOM", license: "MIT", href: "https://github.com/facebook/react" },
       { name: "Tailwind CSS", license: "MIT", href: "https://github.com/tailwindlabs/tailwindcss" },
       { name: "Plyr", license: "MIT", href: "https://github.com/sampotts/plyr" },
+      { name: "qrcode", license: "MIT", href: "https://github.com/soldair/node-qrcode" },
       {
         name: "@opennextjs/cloudflare",
         license: "MIT",
@@ -85,8 +86,8 @@ export default function LicensesPage() {
 
       <Section n={2} title="打包版隨附的二進位檔">
         <p>
-          從發行頁下載的 Windows 打包版（<Code>oasis-portal-win64.zip</Code>
-          ）內含兩個並非由本專案撰寫的第三方執行檔，兩者皆未經修改地重新散布：
+          從發行頁下載的打包版——Windows 的 <Code>oasis-backend-win64.zip</Code> 與 macOS
+          （Apple Silicon）的 <Code>oasis-backend-macos-arm64.zip</Code>——皆內含並非由本專案撰寫的第三方執行檔，均未經修改地重新散布：
         </p>
 
         <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-5">
@@ -94,33 +95,34 @@ export default function LicensesPage() {
             FFmpeg <span className="ml-1 font-mono text-[11px] text-accent">GPL-3.0</span>
           </h3>
           <p className="mb-3 text-[13px] leading-relaxed text-text-secondary">
-            用於合併 HLS / TS 分段並轉檔為 MP4。採用{" "}
-            <Ext href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev</Ext> 的 Windows 靜態建置
-            （release-essentials）。該建置含有 GPL 授權的元件（如 libx264 / libx265），因此整個二進位檔受 GPL 而非 LGPL 規範。
+            用於合併 HLS / TS 分段並轉檔為 MP4。Windows 版採用{" "}
+            <Ext href="https://www.gyan.dev/ffmpeg/builds/">gyan.dev</Ext> 的靜態建置
+            （release-essentials）；macOS 版採用{" "}
+            <Ext href="https://ffmpeg.martin-riedl.de/">ffmpeg.martin-riedl.de</Ext> 的 Apple Silicon
+            靜態建置。兩者皆含 GPL 授權的元件（如 libx264 / libx265），因此整個二進位檔受 GPL 而非 LGPL 規範。
           </p>
           <Highlight>
             <strong className="font-semibold">書面提供（Written offer）</strong>
-            ：對應的原始碼可公開取得。執行 <Code>bin/ffmpeg.exe -version</Code>{" "}
-            會印出版本與完整的 <Code>configuration:</Code> 建置參數；依此版本至{" "}
-            <Ext href="https://git.ffmpeg.org/ffmpeg.git">git.ffmpeg.org</Ext> 或{" "}
+            ：對應的原始碼可公開取得。執行 <Code>bin/ffmpeg -version</Code>（Windows 為{" "}
+            <Code>bin/ffmpeg.exe -version</Code>）會印出版本與完整的 <Code>configuration:</Code>{" "}
+            建置參數；依此版本至 <Ext href="https://git.ffmpeg.org/ffmpeg.git">git.ffmpeg.org</Ext> 或{" "}
             <Ext href="https://ffmpeg.org">ffmpeg.org</Ext> 取得對應的標籤原始碼即可。
           </Highlight>
           <p className="mt-3 text-[13px] leading-relaxed text-text-secondary">
-            GPL v3 全文隨二進位檔一併附於 <Code>bin/ffmpeg-LICENSE.txt</Code>，亦可見於{" "}
+            GPL v3 全文隨兩個平台的二進位檔一併附於 <Code>bin/ffmpeg-LICENSE.txt</Code>，亦可見於{" "}
             <Ext href="https://www.gnu.org/licenses/gpl-3.0.txt">gnu.org</Ext>。
           </p>
         </div>
 
         <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-5">
           <h3 className="mb-1 text-sm font-bold text-text-primary">
-            CPython（embeddable 發行版）
+            CPython 執行環境
             <span className="ml-1 font-mono text-[11px] text-accent">PSF License</span>
           </h3>
           <p className="text-[13px] leading-relaxed text-text-secondary">
-            讓後端與下載器不需系統 Python 也能執行。取自{" "}
-            <Ext href="https://www.python.org/downloads/windows/">python.org</Ext>{" "}
-            的官方 Windows embeddable package（amd64），未經修改；PSF 授權全文隨附於{" "}
-            <Code>python/LICENSE.txt</Code>。
+            讓後端與下載器不需系統安裝 Python 也能執行。由 PyInstaller 將官方 CPython 直接凍結進執行檔（Windows 的{" "}
+            <Code>_internal/</Code>，macOS 的對應目錄），未經修改；PSF 授權全文見{" "}
+            <Ext href="https://docs.python.org/3/license.html">docs.python.org</Ext>。
           </p>
         </div>
 

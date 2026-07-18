@@ -4,7 +4,7 @@
  */
 
 // Bump this whenever the substance of any legal page changes.
-export const LAST_UPDATED = "2026 年 7 月 14 日";
+export const LAST_UPDATED = "2026 年 7 月 19 日";
 
 export const REPO_URL = "https://github.com/fusion-labs-cc/oasis";
 
