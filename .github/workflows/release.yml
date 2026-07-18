@@ -72,6 +72,32 @@ jobs:
           $lic = Get-ChildItem ffmpeg_extracted -Recurse -Filter LICENSE* | Select-Object -First 1
           if ($lic) { Copy-Item $lic.FullName "$bin/ffmpeg-LICENSE.txt" }
 
+      # `oasis-backend.exe` ships unsigned, so a fresh download trips Windows
+      # SmartScreen ("Windows 已保護您的電腦") on first launch. Putting the
+      # click-through steps in the zip itself means a user hits it before
+      # they've even opened the README on GitHub. See the macOS job for the
+      # Gatekeeper equivalent.
+      - name: Add usage instructions
+        shell: pwsh
+        run: |
+          @'
+          Oasis 後端 - Windows 使用說明
+          ====================================
+
+          oasis-backend.exe 沒有數位簽章，第一次執行時 Windows SmartScreen
+          會顯示「Windows 已保護您的電腦」的警告畫面，擋下執行。
+
+          只需要做一次：
+
+          1. 在警告畫面上點選「其他資訊」。
+          2. 畫面下方會出現「仍要執行」按鈕，點一下即可啟動。
+
+          之後同一個檔案就不會再跳出這個警告。
+
+          後端啟動後，直接開啟 https://oasis.fusion-labs.cc，
+          它會自動連到你電腦上 http://localhost:8000 的後端。
+          '@ | Out-File -FilePath "dist/oasis-backend/使用說明.txt" -Encoding utf8
+
       # Upload the onedir folder itself (not a pre-made zip). upload-artifact
       # always zips its input, so uploading a zip would nest zip-in-zip on
       # download; uploading the folder yields a single clean zip. Windows has no
