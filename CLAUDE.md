@@ -12,7 +12,7 @@ One-click bootstrap (installs system deps, creates the venv, runs `npm install`,
 # Windows: double-click oasis-portal.bat (wraps oasis-portal.ps1)
 ```
 
-The portal also runs `git pull --ff-only` on every start, so a source checkout self-updates.
+The portal also runs `git pull --ff-only` on every start, so a source checkout self-updates. It also checks each port before binding and kills a leftover listener there, but only if it can positively identify that process as a stale Oasis instance (an orphan left behind when a previous run's window was closed instead of Ctrl+C'd) — anything else on the port is left alone and reported instead of killed. The frozen build (`run_backend.py`) does the same check for its own port.
 
 Running the two halves by hand:
 
@@ -118,6 +118,8 @@ The two layouts are reconciled purely through **environment variables**. Any cod
 `run_backend.py` sets all of them so writable state (DB, `movies/`) lands **next to the `.exe`**, not inside PyInstaller's extraction dir. It also puts the bundled `bin/ffmpeg` on `PATH` (`encode.py` shells out to a bare `ffmpeg`), and two things about its ordering are load-bearing: it **must** call `multiprocessing.freeze_support()` first — without it every spawned worker re-launches the whole server, i.e. a fork bomb on Windows — and `app/` must go on `sys.path` at **module level, before that call**, because a spawned worker re-executes the `.exe` and unpickles its target (`api._analyze_worker`, `download.*`) by module name, which only resolves if the loose source is already importable.
 
 `video_path` is stored **relative to `MEDIA_ROOT`**. Every endpoint that resolves it (`stream`, `delete`, `open`) re-checks that the absolute path stays under `MEDIA_ROOT` to block path traversal — preserve that guard.
+
+The "server is ready" banner a double-clicking user actually reads has a single source of truth: `api.py`'s startup hook, not `run_backend.py` or a platform launcher. That hook is the one point guaranteed to fire after uvicorn has actually bound the socket (not just attempted to) and identical across platforms — Windows shows it via its auto-opened console, macOS via `scripts/oasis-backend.command`'s inherited Terminal output, `oasis-portal.sh` via its backgrounded uvicorn process. Edit the banner there; don't add a second copy in a launcher.
 
 ### Versioning and self-update
 
