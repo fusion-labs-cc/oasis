@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+`README.md` is user-facing only (setup paths, features, supported sites). `DEVELOPMENT.md` is the human-contributor counterpart to this file — it covers architecture, site adapters, and the update mechanism at a higher level than the deep detail below. The two overlap in topic; when editing architecture, site-adapter, or update-mechanism behaviour here, check whether `DEVELOPMENT.md` needs the same update so they don't drift apart.
+
 ## Commands
 
 One-click bootstrap (installs system deps, creates the venv, runs `npm install`, starts both servers):
@@ -87,7 +89,7 @@ The shipped code contains **no site-specific logic by design**. `site_config.py`
 Two details worth knowing:
 
 - `detect_site()` matches on the host's **registrable-domain label**, never a bare substring, so a look-alike host (`example.com.evil.com`) is rejected before a browser navigates to it.
-- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json` and `missav.json` are committed, and `scripts/app_payload.py` copies the directory into the app payload (`app/sites/`). In a frozen build the adapters actually *loaded* come from a writable `sites/` next to the `.exe`: `run_backend.py` copies the shipped ones into it on every start and **leaves every other file alone**, so a release updates `jable.json`/`missav.json` while a user's own adapters survive updates. (The flip side: editing a shipped adapter in place is reverted on the next start — rename it to keep it.)
+- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json`, `missav.json`, and `supjav.json` are committed, and `scripts/app_payload.py` copies the directory into the app payload (`app/sites/`). In a frozen build the adapters actually *loaded* come from a writable `sites/` next to the `.exe`: `run_backend.py` copies the shipped ones into it on every start and **leaves every other file alone**, so a release updates the shipped adapters while a user's own adapters survive updates. (The flip side: editing a shipped adapter in place is reverted on the next start — rename it to keep it.)
 
 The download pipeline (`download.py`) is: `detect_site` → Selenium extracts the title and m3u8 URL → `resolve_m3u8_to_stream` picks the highest-bandwidth variant from a master playlist → `crawler.py` fetches TS segments across 16 threads (AES-CBC decrypt when keyed, with a **fresh cipher per segment** — CBC is stateful and must never be shared across threads) → merge → FFmpeg remux → move into `movies/`. Overall percent is mapped as: 1% setup, 3–95% segments, 96% merge, 98% encode, 100% done.
 
