@@ -492,62 +492,59 @@ export default function OasisGate() {
           /licenses have to stay reachable by anyone offered a download here. */}
       <div className="absolute inset-x-0 bottom-6 z-10 flex flex-col items-center gap-5 px-6">
         {status === "down" && (PORTAL_DOWNLOADS.length > 0 || EXTENSION_DOWNLOAD_URL) && (
-          <div className="flex flex-col items-center gap-3">
-            {PORTAL_DOWNLOADS.length > 0 && (
-              <div className="flex flex-col items-center gap-2">
-                <span className="text-[11px] tracking-[0.15em] text-white/30">
-                  還沒有綠洲？下載入口程式
-                </span>
-                <div className="flex items-center gap-4">
-                  {PORTAL_DOWNLOADS.map((d) => (
-                    <a
-                      key={d.label}
-                      href={d.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 transition hover:text-white/80"
-                    >
-                      <svg
-                        viewBox="0 0 24 24"
-                        className="h-3.5 w-3.5 transition group-hover:translate-y-0.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M12 3v12" />
-                        <path d="m7 10 5 5 5-5" />
-                        <path d="M5 21h14" />
-                      </svg>
-                      {d.label}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {EXTENSION_DOWNLOAD_URL && (
-              <a
-                href={EXTENSION_DOWNLOAD_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group flex items-center gap-1.5 text-[11px] tracking-[0.15em] text-white/40 transition hover:text-white/80"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-[10px] tracking-[0.2em] text-white/25">
+              還沒有綠洲？下載入口程式與擴充功能
+            </span>
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              {PORTAL_DOWNLOADS.map((d) => (
+                <a
+                  key={d.label}
+                  href={d.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
                 >
-                  <path d="M19.44 7.85c-.05.32.06.65.29.88l1.56 1.57c.47.47.71 1.08.71 1.7s-.24 1.23-.71 1.7l-1.6 1.62c-.24.23-.55.34-.84.27-.47-.07-.8-.48-.97-.92a2.5 2.5 0 1 0-3.21 3.21c.44.17.85.5.92.97a.98.98 0 0 1-.27.84l-1.62 1.6c-.47.47-1.08.71-1.7.71s-1.23-.24-1.7-.71l-1.57-1.56a1.03 1.03 0 0 0-.88-.29c-.49.07-.84.5-1.02.97a2.5 2.5 0 1 1-3.24-3.24c.47-.18.9-.53.97-1.02a1.03 1.03 0 0 0-.29-.88l-1.56-1.57A2.4 2.4 0 0 1 2 12c0-.62.24-1.23.71-1.7l1.52-1.53c.24-.24.58-.35.92-.3.51.08.88.53 1.07 1.01a2.5 2.5 0 1 0 3.26-3.26c-.48-.2-.93-.56-1.01-1.07a1.03 1.03 0 0 1 .3-.92l1.53-1.52A2.4 2.4 0 0 1 12 2c.62 0 1.23.24 1.7.71l1.57 1.56c.23.23.56.34.88.29.49-.07.84-.5 1.02-.97a2.5 2.5 0 1 1 3.24 3.24c-.47.18-.9.53-.97 1.02Z" />
-                </svg>
-                安裝瀏覽器擴充功能
-              </a>
-            )}
+                  {d.label === "macOS" ? (
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 4.17c.66-.81 1.11-1.93.99-3.06-1 .04-2.21.67-2.93 1.49-.62.69-1.16 1.84-1.01 2.96 1.12.09 2.27-.58 2.95-1.39" />
+                    </svg>
+                  ) : (
+                    <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M0 3.449L9.75 2.1v9.451H0V3.449zM0 12.45h9.75v9.45L0 20.551v-8.101zM10.95 1.936L24 0v11.55H10.95V1.936zM10.95 12.45H24v11.55l-13.05-1.937V12.45z" />
+                    </svg>
+                  )}
+                  <span>{d.label} 版程式</span>
+                  <svg className="h-3 w-3 opacity-40 transition-transform duration-200 group-hover:translate-y-0.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7" />
+                  </svg>
+                </a>
+              ))}
+              {EXTENSION_DOWNLOAD_URL && (
+                <a
+                  href={EXTENSION_DOWNLOAD_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] tracking-[0.05em] text-white/55 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] hover:text-white/90 cursor-pointer"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M19.44 7.85c-.05.32.06.65.29.88l1.56 1.57c.47.47.71 1.08.71 1.7s-.24 1.23-.71 1.7l-1.6 1.62c-.24.23-.55.34-.84.27-.47-.07-.8-.48-.97-.92a2.5 2.5 0 1 0-3.21 3.21c.44.17.85.5.92.97a.98.98 0 0 1-.27.84l-1.62 1.6c-.47.47-1.08.71-1.7.71s-1.23-.24-1.7-.71l-1.57-1.56a1.03 1.03 0 0 0-.88-.29c-.49.07-.84.5-1.02.97a2.5 2.5 0 1 1-3.24-3.24c.47-.18.9-.53.97-1.02a1.03 1.03 0 0 0-.29-.88l-1.56-1.57A2.4 2.4 0 0 1 2 12c0-.62.24-1.23.71-1.7l1.52-1.53c.24-.24.58-.35.92-.3.51.08.88.53 1.07 1.01a2.5 2.5 0 1 0 3.26-3.26c-.48-.2-.93-.56-1.01-1.07a1.03 1.03 0 0 1 .3-.92l1.53-1.52A2.4 2.4 0 0 1 12 2c.62 0 1.23.24 1.7.71l1.57 1.56c.23.23.56.34.88.29.49-.07.84-.5 1.02-.97a2.5 2.5 0 1 1 3.24 3.24c-.47.18-.9.53-.97 1.02Z" />
+                  </svg>
+                  <span>Chrome 擴充功能</span>
+                  <svg className="h-3 w-3 opacity-40 transition-transform duration-200 group-hover:translate-x-0.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 13l-7 7-7-7" />
+                  </svg>
+                </a>
+              )}
+            </div>
           </div>
         )}
 
