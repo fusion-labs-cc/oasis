@@ -57,7 +57,7 @@ async function render() {
   // Save stays available so the current tab can still be captured while hidden.
   listView.hidden = hidden;
   hideBtn.innerHTML = hidden ? EYE_CLOSED : EYE_OPEN;
-  hideBtn.title = hideBtn.ariaLabel = hidden ? "Show list" : "Hide list";
+  hideBtn.title = hideBtn.ariaLabel = hidden ? "顯示清單" : "隱藏清單";
   if (hidden) return;
 
   const items = await getSaved();
@@ -93,7 +93,7 @@ async function render() {
       const remove = document.createElement("button");
       remove.className = "remove";
       remove.type = "button";
-      remove.textContent = "Delete";
+      remove.textContent = "刪除";
       remove.addEventListener("click", () => removeItem(item.id));
 
       li.append(main, remove);
@@ -129,13 +129,13 @@ async function removeItem(id) {
 async function saveCurrent() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || /^(chrome|edge|about|chrome-extension):/.test(tab.url)) {
-    flash("This page can't be saved.");
+    flash("這個頁面無法儲存。");
     return;
   }
 
   const items = await getSaved();
   if (items.some((item) => item.url === tab.url)) {
-    flash("Already saved.");
+    flash("已經儲存過了。");
     return;
   }
 
@@ -146,7 +146,7 @@ async function saveCurrent() {
     createdAt: new Date().toISOString(),
   });
   await setSaved(items);
-  flash("Saved.");
+  flash("已儲存。");
   render();
 }
 

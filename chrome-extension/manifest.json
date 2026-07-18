@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OASIS",
-  "version": "1.0.0",
-  "description": "Save the current tab's URL with its creation date. Shared across normal and incognito windows.",
+  "version": "1.1.0",
+  "description": "儲存目前分頁的網址與儲存時間，並可在一般視窗與無痕視窗之間共用清單。",
   "permissions": ["storage", "tabs"],
   "action": {
     "default_popup": "popup.html",

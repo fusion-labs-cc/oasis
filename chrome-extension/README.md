@@ -1,31 +1,30 @@
-# OASIS Chrome Extension
+# OASIS 瀏覽器擴充功能
 
-A minimal Manifest V3 Chrome extension, styled after the Oasis website (dark
-surfaces, emerald accent, the Oasis cat logo). Click the toolbar icon to see every
-saved URL with its creation date; click **Save current tab** to add the active page.
+一個極簡的 Manifest V3 Chrome 擴充功能，沿用 Oasis 網站的風格（深色底、翡翠綠強
+調色、Oasis 貓咪標誌）。點工具列圖示即可看到所有已儲存的網址與其儲存時間；按
+**儲存目前分頁** 把目前頁面加進清單。
 
-## Install (unpacked)
+## 安裝（未封裝）
 
-1. Open `chrome://extensions`.
-2. Turn on **Developer mode** (top right).
-3. Click **Load unpacked** and select this `chrome-extension/` folder.
+1. 開啟 `chrome://extensions`。
+2. 打開右上角的 **開發人員模式**。
+3. 點 **載入未封裝項目**，選擇這個 `chrome-extension/` 資料夾。
 
-## Sharing data with incognito windows
+## 與無痕視窗共用資料
 
-The saved list lives in `chrome.storage.local`. With `"incognito": "spanning"`
-(the default set in `manifest.json`), a single extension process serves both
-normal and incognito windows, so the two share the exact same store — save in one,
-it appears in the other.
+清單資料存在 `chrome.storage.local`。因為 `manifest.json` 預設設了
+`"incognito": "spanning"`，同一個擴充功能程序同時服務一般視窗與無痕視窗，兩者共用
+完全相同的儲存空間 — 在其中一邊儲存，另一邊也會出現。
 
-To use the extension inside incognito at all you must grant it access:
+要讓擴充功能能在無痕模式下執行，必須先授權：
 
-1. Open `chrome://extensions`, find **OASIS**, click **Details**.
-2. Enable **Allow in Incognito**.
+1. 開啟 `chrome://extensions`，找到 **OASIS**，點 **詳細資料**。
+2. 開啟 **允許在無痕模式下執行**。
 
-Without that toggle Chrome simply won't run the extension in incognito windows.
+沒開這個開關，Chrome 就不會讓擴充功能在無痕視窗執行。
 
-## Files
+## 檔案
 
-- `manifest.json` — MV3 config, permissions (`storage`, `tabs`), spanning incognito.
-- `popup.html` / `popup.css` — the list UI shown when the extension is activated.
-- `popup.js` — read/write `chrome.storage.local`, render the list, save/delete.
+- `manifest.json` — MV3 設定、權限（`storage`、`tabs`）、spanning 無痕模式。
+- `popup.html` / `popup.css` — 啟用擴充功能時顯示的清單介面。
+- `popup.js` — 讀寫 `chrome.storage.local`、渲染清單、儲存／刪除。
