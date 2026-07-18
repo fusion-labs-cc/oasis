@@ -97,6 +97,14 @@ export default function OasisGate() {
   const [boost, setBoost] = useState(false);
   const attempted = useRef(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const hiddenInputRef = useRef<HTMLInputElement>(null);
+  const [inputFocused, setInputFocused] = useState(false);
+
+  // Reachable, but it won't have us: either it wants an access code we don't
+  // hold, or it has none set and refuses us for not being its own machine.
+  const blocked = status === "down" && downReason === "auth" && !editingUrl;
+  const needsCode = blocked && codeSet;
+  const notConfigured = blocked && !codeSet;
 
   // Authorized users skip the gate entirely: hide it before first paint so a
   // refresh/reopen drops straight into the app — no entrance, no dissolve.
@@ -172,6 +180,13 @@ export default function OasisGate() {
     };
   }, [visible]);
 
+  // Auto-focus the access code input when the code prompt is revealed
+  useEffect(() => {
+    if (needsCode && hiddenInputRef.current) {
+      hiddenInputRef.current.focus();
+    }
+  }, [needsCode]);
+
   function connect() {
     const url = draft.trim();
     if (!url) return;
@@ -187,7 +202,10 @@ export default function OasisGate() {
   // is already the right one by the time this form shows (that is how we learned a
   // code was wanted), so the code is filed against the correct host.
   async function enterCode() {
-    const code = codeDraft.trim();
+    let code = codeDraft.trim();
+    if (code.length === 8) {
+      code = `${code.slice(0, 4)}-${code.slice(4)}`;
+    }
     if (!code || submitting) return;
     attempted.current = true;
     setSubmitting(true);
@@ -204,8 +222,7 @@ export default function OasisGate() {
 
   function handleAccessCodeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const raw = e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 8);
-    const formatted = raw.length > 4 ? `${raw.slice(0, 4)}-${raw.slice(4)}` : raw;
-    setCodeDraft(formatted);
+    setCodeDraft(raw);
   }
 
   // Adopt the scanned backend URL. There is no credential in the link, so this is
@@ -222,12 +239,6 @@ export default function OasisGate() {
   }
 
   if (!visible) return null;
-
-  // Reachable, but it won't have us: either it wants an access code we don't
-  // hold, or it has none set and refuses us for not being its own machine.
-  const blocked = status === "down" && downReason === "auth" && !editingUrl;
-  const needsCode = blocked && codeSet;
-  const notConfigured = blocked && !codeSet;
 
   return (
     <div
@@ -382,31 +393,79 @@ export default function OasisGate() {
                 />
                 需要存取碼
               </div>
-              <label className="mb-2 block text-left text-xs font-semibold uppercase tracking-[0.3em] text-white/35">
-                存取碼
-              </label>
-              <div className="flex gap-2">
+
+              <div className="flex flex-col items-center gap-4 w-full">
                 <input
-                  type="password"
+                  ref={hiddenInputRef}
+                  type="text"
                   value={codeDraft}
                   onChange={handleAccessCodeChange}
+                  onFocus={() => setInputFocused(true)}
+                  onBlur={() => setInputFocused(false)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") enterCode();
+                    if (e.key === "Enter" && codeDraft.length === 8) enterCode();
                   }}
-                  placeholder="XXXX-XXXX"
-                  autoComplete="current-password"
+                  maxLength={8}
+                  className="sr-only"
+                  autoComplete="off"
                   spellCheck={false}
-                  className="min-w-0 flex-1 rounded-lg border border-white/15 bg-white/[0.04] px-3 py-2.5 font-mono text-sm uppercase tracking-widest text-white/90 outline-none backdrop-blur transition placeholder:normal-case placeholder:tracking-normal placeholder:text-white/25 focus:border-[#7aa2ff] focus:bg-white/[0.07]"
                 />
+
+                <div
+                  onClick={() => hiddenInputRef.current?.focus()}
+                  className="flex items-center justify-center gap-1.5 cursor-text py-1"
+                >
+                  {[0, 1, 2, 3].map((index) => {
+                    const char = codeDraft[index] || "";
+                    const isActive = inputFocused && (codeDraft.length === index || (index === 7 && codeDraft.length === 8));
+                    return (
+                      <div
+                        key={index}
+                        className={`w-9 h-11 rounded-lg border flex items-center justify-center font-mono text-lg font-bold transition-all duration-200 ${
+                          isActive
+                            ? "border-[#7aa2ff] bg-white/[0.08] text-white shadow-[0_0_10px_rgba(122,162,255,0.4)]"
+                            : char
+                            ? "border-white/20 bg-white/[0.06] text-white"
+                            : "border-white/10 bg-white/[0.02] text-white/20"
+                        }`}
+                      >
+                        {char}
+                      </div>
+                    );
+                  })}
+
+                  <span className="mx-1 text-lg font-bold text-white/30">-</span>
+
+                  {[4, 5, 6, 7].map((index) => {
+                    const char = codeDraft[index] || "";
+                    const isActive = inputFocused && (codeDraft.length === index || (index === 7 && codeDraft.length === 8));
+                    return (
+                      <div
+                        key={index}
+                        className={`w-9 h-11 rounded-lg border flex items-center justify-center font-mono text-lg font-bold transition-all duration-200 ${
+                          isActive
+                            ? "border-[#7aa2ff] bg-white/[0.08] text-white shadow-[0_0_10px_rgba(122,162,255,0.4)]"
+                            : char
+                            ? "border-white/20 bg-white/[0.06] text-white"
+                            : "border-white/10 bg-white/[0.02] text-white/20"
+                        }`}
+                      >
+                        {char}
+                      </div>
+                    );
+                  })}
+                </div>
+
                 <button
                   type="button"
                   onClick={enterCode}
-                  disabled={submitting}
-                  className="shrink-0 rounded-lg bg-gradient-to-r from-[#4be1ff] to-[#a78bfa] px-5 py-2.5 text-sm font-bold text-[#050510] transition hover:brightness-110 active:scale-95 disabled:opacity-50"
+                  disabled={submitting || codeDraft.length < 8}
+                  className="w-full rounded-lg bg-gradient-to-r from-[#4be1ff] to-[#a78bfa] py-2.5 text-sm font-bold text-[#050510] transition hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {submitting ? "驗證中…" : "進入"}
                 </button>
               </div>
+
               {authError ? (
                 <p className="mt-3 text-left text-xs leading-relaxed text-[#ff8fa3]">
                   {authError}
