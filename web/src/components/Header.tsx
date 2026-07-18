@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import BackendStatus from "./BackendStatus";
+import OasisLogo from "./OasisLogo";
 import AddVideoModal from "./AddVideoModal";
 import ImportExportModal from "./ImportExportModal";
 import { useVideos } from "@/context/VideoContext";
@@ -256,8 +257,9 @@ export default function Header() {
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
             <Link
               href="/"
-              className="flex items-center gap-1.5 font-mono text-lg font-black tracking-[0.15em] text-text-primary transition hover:text-accent sm:text-xl sm:tracking-[0.25em]"
+              className="group flex items-center gap-2 font-mono text-lg font-black tracking-[0.15em] text-text-primary transition hover:text-accent sm:text-xl sm:tracking-[0.25em]"
             >
+              <OasisLogo className="h-6 w-6 shrink-0 transition-transform duration-300 group-hover:rotate-[8deg] group-hover:scale-105 sm:h-7 sm:w-7" />
               OASIS
             </Link>
 
