@@ -23,9 +23,9 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["both","windows"]'), github.event.inputs.platform) }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -78,7 +78,7 @@ jobs:
       # exec bit or symlinks to lose, so the raw folder round-trips fine. The
       # release job produces the final distributable zip.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: oasis-backend-win64
           path: dist/oasis-backend
@@ -87,9 +87,9 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || contains(fromJSON('["both","macos"]'), github.event.inputs.platform) }}
     runs-on: macos-latest     # Apple Silicon (arm64)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -132,7 +132,7 @@ jobs:
         run: ditto -c -k --sequesterRsrc dist/oasis-backend oasis-backend-macos-arm64.zip
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: oasis-backend-macos-arm64
           path: oasis-backend-macos-arm64.zip
@@ -144,9 +144,9 @@ jobs:
     steps:
       # Checkout first: it cleans the workspace, which would wipe the downloaded
       # artifacts if they landed before it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"      # must match the build jobs: the RUNTIME
                                       # stamp includes the Python version, and a
@@ -173,7 +173,7 @@ jobs:
         run: (cd chrome-extension && zip -qr ../oasis-chrome-extension.zip . -x '*.DS_Store')
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
 
