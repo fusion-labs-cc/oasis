@@ -15,6 +15,7 @@ import multiprocessing
 import os
 import sys
 import asyncio
+import webbrowser
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse, Response
@@ -206,6 +207,15 @@ def _init_db():
     if app_dir:
         print(f', app dir: {app_dir}', end='')
     print(')')
+    if app_dir:
+        # OASIS_APP_DIR is only set by run_backend.py, i.e. this is the frozen
+        # .exe / .command double-click launch, never a source checkout's
+        # `uvicorn --reload` dev session (which would otherwise pop a new tab
+        # on every reload) or oasis-portal.sh.
+        try:
+            webbrowser.open('https://oasis.fusion-labs.cc')
+        except Exception as exc:
+            print(f'（無法自動開啟瀏覽器，請手動開啟：{exc}）')
     db_setup.create_tables()
     # The console is the only place the code is ever shown, so print it on every
     # start: that is where the user goes to read it off.
