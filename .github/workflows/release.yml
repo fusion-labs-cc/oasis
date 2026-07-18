@@ -125,15 +125,37 @@ jobs:
           lic="$(find ffmpeg_extracted -iname 'LICENSE*' -o -iname 'GPL*' | head -1)"
           if [ -n "$lic" ]; then cp "$lic" "$bin/ffmpeg-LICENSE.txt"; fi
 
-      # A raw Mach-O binary has no Finder double-click affordance and trips
-      # Gatekeeper's "unidentified developer" block; a .command script sidesteps
-      # both (see the script's own header for why). Renamed to a human-readable
-      # name here because *this* is the filename the end user sees in Finder --
-      # the in-repo name stays a normal slug like every other CI-only script.
-      - name: Add double-click launcher
+      # `oasis-backend` ships unsigned, so a fresh download is quarantined and
+      # Gatekeeper blocks the double-click until `xattr -cr` runs once. Putting
+      # that step in the zip itself means a user hits it before they've even
+      # opened the README on GitHub.
+      - name: Add usage instructions
+        # printf args, not a heredoc: a heredoc's closing delimiter would need
+        # to sit at column 0 to be recognized, which a YAML block scalar (this
+        # `run: |`) can't express without ending the scalar early.
         run: |
-          cp scripts/oasis-backend-macos.command "dist/oasis-backend/啟動 Oasis 後端.command"
-          chmod +x "dist/oasis-backend/啟動 Oasis 後端.command"
+          printf '%s\n' \
+            'Oasis 後端 - macOS 使用說明' \
+            '====================================' \
+            '' \
+            'oasis-backend 沒有 Apple 開發者簽章，第一次執行前需要手動解除' \
+            '隔離標記，否則雙擊會被 Gatekeeper 擋下（顯示「無法確認開發者」）。' \
+            '' \
+            '只需要做一次：' \
+            '' \
+            '1. 在這個資料夾空白處按滑鼠右鍵 →「服務」→「於資料夾建立終端機頁籤」' \
+            '   （沒有這個選項的話，把整個資料夾拖到 Dock 上的「終端機」圖示，' \
+            '   一樣能在這個路徑開啟終端機）。' \
+            '' \
+            '2. 在跳出的終端機視窗輸入以下指令並按 Enter：' \
+            '' \
+            '   xattr -cr .' \
+            '' \
+            '3. 之後就可以直接雙擊 oasis-backend 啟動後端。' \
+            '' \
+            '後端啟動後，直接開啟 https://oasis.fusion-labs.cc，' \
+            '它會自動連到你電腦上 http://localhost:8000 的後端。' \
+            > "dist/oasis-backend/使用說明.txt"
 
       - name: Package zip
         # `ditto` preserves the executable bit and PyInstaller's symlinks inside
