@@ -190,6 +190,31 @@ if ($ChromePath) {
 Write-Host ""
 
 # -------------------------------------------------------------
+# Free a stale backend still holding the port
+# -------------------------------------------------------------
+# If a previous run's window was closed instead of stopping the server with
+# Ctrl+C, uvicorn can be left running and still bound to the port, so this run
+# would fail with "address already in use". Only kill it if the process on
+# that port can be positively identified as a leftover Oasis backend; anything
+# else is left alone and reported instead.
+$CurrentStep = "Checking for a stale backend on port 8000"
+$StaleConn = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($StaleConn) {
+    $StalePid = $StaleConn.OwningProcess
+    $StaleCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$StalePid" -ErrorAction SilentlyContinue).CommandLine
+    if ($StaleCmd -match "uvicorn" -and $StaleCmd -match "api:app") {
+        Write-Host "  [INFO] Found a leftover backend on port 8000 (pid $StalePid) -- stopping it..." -ForegroundColor Yellow
+        Stop-Process -Id $StalePid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    } else {
+        Write-Host "  [ERROR] Port 8000 is already in use by another program (pid $StalePid)." -ForegroundColor Red
+        Write-Host "  Please close it and run this script again."
+        Read-Host "Press Enter to exit"
+        exit 1
+    }
+}
+
+# -------------------------------------------------------------
 # Execution: Run Server
 # -------------------------------------------------------------
 $CurrentStep = "Launching backend server (uvicorn)"

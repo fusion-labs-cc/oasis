@@ -267,6 +267,33 @@ echo "  ✅ movies/ ready"
 
 step "Starting services"
 
+# If a previous run's terminal window was closed instead of stopping the
+# servers with Ctrl+C, uvicorn/next never got SIGINT and can be left orphaned,
+# still holding their port — this run would then fail with "address already in
+# use". Only kill what we can positively identify as a leftover from this
+# project; anything else on the port is left alone and reported instead.
+free_stale_port() {                # free_stale_port <port> <label> <grep-pattern>
+    local port=$1 label=$2 pattern=$3
+    command -v lsof >/dev/null 2>&1 || return 0
+    local pid
+    for pid in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null); do
+        local cmd
+        cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+        if echo "$cmd" | grep -qE "$pattern"; then
+            echo "  ⚠️  發現殘留的 $label 行程 (pid $pid)，正在清除…"
+            kill "$pid" 2>/dev/null
+            sleep 1
+            kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+        else
+            echo "  ❌ Port $port 已被其他程式佔用 (pid $pid)，無法啟動 $label。"
+            echo "     請自行結束該行程後再重新執行本腳本。"
+            exit 1
+        fi
+    done
+}
+
+free_stale_port 8000 "後端 (uvicorn)" "uvicorn.*api:app"
+
 echo "  🟢 FastAPI backend  → http://localhost:8000"
 # No --reload: this is the end-user launcher, and auto-reload restarts the
 # server (wiping the in-memory download queue) whenever a .py file changes,
@@ -295,6 +322,8 @@ fi
 
 # Wait a moment for the API to bind
 sleep 2
+
+free_stale_port 3000 "前端 (Next.js)" "next"
 
 echo "  🟢 Next.js frontend → http://localhost:3000"
 (cd web && npm run dev) &

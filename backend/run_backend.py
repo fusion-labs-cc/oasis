@@ -58,6 +58,7 @@ its existing behaviour untouched.
 import multiprocessing
 import os
 import shutil
+import subprocess
 import sys
 import time
 
@@ -122,6 +123,89 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _find_listener_pid(port: int) -> int | None:
+    """PID of whatever is listening on `port`, or None if nothing is / it can't be told."""
+    try:
+        if sys.platform == 'win32':
+            out = subprocess.run(
+                ['netstat', '-ano', '-p', 'TCP'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[0] == 'TCP' and parts[-2] == 'LISTENING' and parts[1].endswith(f':{port}'):
+                    return int(parts[-1])
+        else:
+            out = subprocess.run(
+                ['lsof', '-tiTCP:' + str(port), '-sTCP:LISTEN'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            pids = [int(p) for p in out.split() if p.strip().isdigit()]
+            return pids[0] if pids else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return None
+
+
+def _is_stale_oasis_backend(pid: int) -> bool:
+    """True only if `pid` can be positively identified as a leftover instance of
+    this same executable -- an unrelated program on the port is left untouched.
+    """
+    exe_name = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
+    try:
+        if sys.platform == 'win32':
+            out = subprocess.run(
+                ['tasklist', '/FI', f'PID eq {pid}', '/FO', 'CSV', '/NH'],
+                capture_output=True, text=True, timeout=5,
+            ).stdout
+            return exe_name.lower() in out.lower()
+        out = subprocess.run(
+            ['ps', '-p', str(pid), '-o', 'comm='],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        return exe_name in out or 'uvicorn' in out
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _terminate_pid(pid: int, timeout: float = 5.0) -> None:
+    if sys.platform == 'win32':
+        subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True, timeout=timeout)
+        return
+    import signal
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and _pid_alive(pid):
+        time.sleep(0.2)
+    if _pid_alive(pid):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _free_stale_port(port: int) -> None:
+    """Clear a leftover backend still bound to `port` from a run whose window
+    was closed without stopping it first (so it never received SIGINT/SIGTERM
+    and got orphaned holding the socket). Only ever touches a process we can
+    positively identify as ourselves; anything else is left alone and reported
+    so the user can free it themselves rather than something unrelated getting
+    killed.
+    """
+    pid = _find_listener_pid(port)
+    if pid is None:
+        return
+    if _is_stale_oasis_backend(pid):
+        print(f'==> Port {port} 被前一次未正常關閉的後端行程佔用 (pid {pid})，正在清除…')
+        _terminate_pid(pid)
+    else:
+        print(f'==> Port {port} 已被其他程式佔用 (pid {pid})，請結束該行程後再重新啟動。')
 
 
 def _apply_pending_update(base: str, app: str) -> None:
@@ -236,6 +320,8 @@ def main() -> None:
 
     host = os.environ.get('HOST', '127.0.0.1')
     port = int(os.environ.get('PORT', '8000'))
+
+    _free_stale_port(port)
 
     import uvicorn
     from api import app as fastapi_app
