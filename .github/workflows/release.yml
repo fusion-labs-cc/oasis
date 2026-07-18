@@ -125,6 +125,16 @@ jobs:
           lic="$(find ffmpeg_extracted -iname 'LICENSE*' -o -iname 'GPL*' | head -1)"
           if [ -n "$lic" ]; then cp "$lic" "$bin/ffmpeg-LICENSE.txt"; fi
 
+      # A raw Mach-O binary has no Finder double-click affordance and trips
+      # Gatekeeper's "unidentified developer" block; a .command script sidesteps
+      # both (see the script's own header for why). Renamed to a human-readable
+      # name here because *this* is the filename the end user sees in Finder --
+      # the in-repo name stays a normal slug like every other CI-only script.
+      - name: Add double-click launcher
+        run: |
+          cp scripts/oasis-backend-macos.command "dist/oasis-backend/啟動 Oasis 後端.command"
+          chmod +x "dist/oasis-backend/啟動 Oasis 後端.command"
+
       - name: Package zip
         # `ditto` preserves the executable bit and PyInstaller's symlinks inside
         # the app folder, which a plain Compress step would flatten. No parent

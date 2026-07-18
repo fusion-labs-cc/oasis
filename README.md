@@ -84,6 +84,15 @@ chmod +x oasis-portal.sh
 5. 啟動並預載 FastAPI 後端服務（Port 8000）。
 6. 啟動 Next.js 開發伺服器（Port 3000）並自動開啟瀏覽器。
 
+### 📦 只想在自己電腦跑後端，連到 [oasis.fusion-labs.cc](https://oasis.fusion-labs.cc)？
+
+不需要 git、Node.js 或 Python：到 [Releases](../../releases) 下載對應作業系統的 `oasis-backend-*.zip`，解壓縮後：
+
+- **Windows**：雙擊 `oasis-backend.exe`。
+- **macOS**：雙擊 `啟動 Oasis 後端.command`（**不要**直接雙擊 `oasis-backend` 執行檔——Finder 不知道怎麼開啟它，而且會被 Gatekeeper 擋下）。
+
+後端啟動後，直接開啟上面的網站即可，它會自動連到你電腦上 `http://localhost:8000` 的後端。
+
 ---
 
 ## 🔄 軟體更新 (Updating)
