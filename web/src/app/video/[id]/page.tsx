@@ -36,6 +36,7 @@ export default function VideoDetailPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [theater, setTheater] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const plyrRef = useRef<Plyr | null>(null);
   const theaterBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -199,6 +200,7 @@ export default function VideoDetailPage() {
   // Restore + persist the theater-mode preference (browser only).
   useEffect(() => {
     setTheater(localStorage.getItem("oasis:theater") === "1");
+    setMounted(true);
   }, []);
   useEffect(() => {
     localStorage.setItem("oasis:theater", theater ? "1" : "0");
@@ -561,8 +563,8 @@ export default function VideoDetailPage() {
               autoPlay={false}
               onPlay={handlePlay}
               className="mx-auto w-full aspect-video max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] outline-none"
-              src={streamUrl(video.id!)}
-              poster={coverUrl(video) || undefined}
+              src={mounted ? streamUrl(video.id!) : undefined}
+              poster={mounted ? (coverUrl(video) || undefined) : undefined}
             >
               您的瀏覽器不支援影片播放。
             </video>
@@ -572,7 +574,7 @@ export default function VideoDetailPage() {
 
       {(!video.video_path || !video.local_file_exists) && (
         <div className="relative mx-auto aspect-video w-full max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
-          {coverUrl(video) && (
+          {mounted && coverUrl(video) && (
             <>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

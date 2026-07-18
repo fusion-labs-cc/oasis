@@ -33,6 +33,7 @@ export default function Home() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [exportSelectionOpen, setExportSelectionOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const toast = useToast();
   const [lastWatched, setLastWatched] = useState<{
@@ -101,6 +102,7 @@ export default function Home() {
 
   useEffect(() => {
     document.title = "OASIS";
+    setMounted(true);
   }, []);
 
   // The catalog (initial load + download reconciliation) is owned by
@@ -378,7 +380,7 @@ export default function Home() {
             </div>
 
             {/* Right side: Cover Preview */}
-            {coverUrl(lastWatched.video) && (
+            {mounted && coverUrl(lastWatched.video) && (
               <div className="relative h-28 md:h-36 aspect-video rounded-xl overflow-hidden border border-border-hairline group/hero-cover shrink-0 shadow-lg">
                 <Link href={`/video/${lastWatched.video.id}`} className="block w-full h-full">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -855,6 +857,11 @@ function VideoCard({
   const { addDownloadTask, markDownloadCanceled } = useTasks();
   const [downloading, setDownloading] = useState(false);
   const [playCount, setPlayCount] = useState(video.play_count ?? 0);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const isDownloading = downloading || video.is_downloading;
 
@@ -952,7 +959,7 @@ function VideoCard({
         </>
       )}
       <Link href={`/video/${video.id}`} className="block relative aspect-video w-full overflow-hidden bg-surface-highest">
-        {coverUrl(video) ? (
+        {mounted && coverUrl(video) ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={coverUrl(video)!}
