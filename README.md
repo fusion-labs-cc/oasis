@@ -138,6 +138,8 @@ chmod +x oasis-portal.sh
 - 觸發問題的操作步驟，以及預期結果 vs. 實際結果。
 - 若後端主控台視窗有印出錯誤訊息，直接複製貼上。
 
+不方便用 GitHub 的話，也可以填 [問題回饋表單](https://forms.gle/q4WhDeBxHkQu7TB8A)。
+
 ⚠️ **請不要**附上你的存取碼、`oasis.db`、`oasis.auth.json` 或其他包含個資／連結的檔案內容。
 
 ---
