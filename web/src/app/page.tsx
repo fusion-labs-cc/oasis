@@ -10,10 +10,8 @@ import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
 import SupportedSites from "@/components/SupportedSites";
 import ImportExportModal from "@/components/ImportExportModal";
-import { useSettings } from "@/lib/settings";
 
 export default function Home() {
-  const { nickname } = useSettings();
   // Full catalog lives in the shared VideoContext so it survives navigation.
   // Filtering below is all client-side.
   const { videos: allVideos, loading: loadingList, error, updateVideo, removeVideo } = useVideos();
@@ -383,7 +381,7 @@ export default function Home() {
                 💡 開始觀看
               </span>
               <h1 className="text-xl font-bold tracking-tight text-text-primary mt-3">
-                {nickname ? `歡迎回來，${nickname}` : "歡迎來到 OASIS"}
+                歡迎來到 OASIS
               </h1>
               <p className="mt-2 text-xs text-text-tertiary leading-relaxed font-sans">
                 私有媒體目錄，已解析本機播放與背景下載管理。當您開始觀看影片或有最近播放進度時，此處將會顯示您的「繼續觀看」卡片，方便您隨時接續播放。

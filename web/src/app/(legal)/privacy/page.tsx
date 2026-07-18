@@ -51,7 +51,7 @@ export default function PrivacyPage() {
               <Code>oasis:authorized</Code>——你是否已通過入口，避免每次重新整理都要再連一次。
             </>,
             <>你的後端位址（入口座標），讓下次能自動連線。</>,
-            <>你的個人設定：暱稱、鍵盤快速鍵、Awake 模式的開關與狀態。</>,
+            <>你的個人設定：鍵盤快速鍵、Awake 模式的開關與狀態。</>,
           ]}
         />
         <p>

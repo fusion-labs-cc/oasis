@@ -877,9 +877,7 @@ export default function SettingsPage() {
   }
 
   function handleSave() {
-    const trimmed: Settings = { ...form, nickname: form.nickname.trim() };
-    saveSettings(trimmed);
-    setForm(trimmed);
+    saveSettings(form);
     toast("已儲存設定", { type: "success" });
   }
 
@@ -915,31 +913,9 @@ export default function SettingsPage() {
           設定
         </h1>
         <p className="mt-1 text-xs text-text-tertiary">
-          個人化你的暱稱、Awake 模式與鍵盤快速鍵。設定會保存在此瀏覽器中。
+          個人化 Awake 模式與鍵盤快速鍵。設定會保存在此瀏覽器中。
         </p>
       </div>
-
-      {/* Profile */}
-      <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">
-        <div className="pt-6">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
-            個人資料
-          </span>
-        </div>
-        <Field
-          title="暱稱"
-          description="顯示在首頁歡迎區的稱呼。留空則不顯示暱稱。"
-        >
-          <input
-            type="text"
-            value={form.nickname}
-            onChange={(e) => update("nickname", e.target.value)}
-            maxLength={40}
-            placeholder="輸入你的暱稱"
-            className="w-full sm:w-56 rounded-lg border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary placeholder-text-tertiary outline-none transition focus:border-accent/50"
-          />
-        </Field>
-      </section>
 
       {/* Awake Mode */}
       <section className="mb-8 rounded-2xl border border-border-hairline bg-surface-elevated/40 px-6">

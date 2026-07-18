@@ -152,10 +152,10 @@ function HeaderActions({
         {!vertical && <kbd className={kbdClass}>{keyDisplay}</kbd>}
       </button>
 
-      {/* Settings — nickname, Awake Mode, and keyboard shortcuts */}
+      {/* Settings — Awake Mode and keyboard shortcuts */}
       <Link
         href="/settings"
-        title="設定：暱稱、Awake 模式與鍵盤快速鍵"
+        title="設定：Awake 模式與鍵盤快速鍵"
         aria-label="設定"
         onClick={onAction}
         className={

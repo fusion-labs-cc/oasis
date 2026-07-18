@@ -3,7 +3,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 /**
- * User preferences — nickname, Awake Mode, and the customizable keyboard
+ * User preferences — Awake Mode and the customizable keyboard
  * shortcuts. Everything lives in a single localStorage entry so it survives
  * reloads. Components read via {@link useSettings}, which re-renders whenever
  * settings change (in this tab via a custom event, or in another tab via the
@@ -22,8 +22,6 @@ export interface Hotkey {
 }
 
 export interface Settings {
-  /** Display name shown around the app. Empty = no nickname set. */
-  nickname: string;
   /** When false, the Awake Mode shortcut and header button are disabled. */
   awakeEnabled: boolean;
   /** Shortcut that toggles Awake Mode (the "boss key" Google disguise). */
@@ -52,7 +50,6 @@ export function isMacPlatform(): boolean {
  */
 export function defaultSettings(mac: boolean = isMacPlatform()): Settings {
   return {
-    nickname: "",
     awakeEnabled: false,
     awakeHotkey: mac
       ? { key: "x", meta: true, ctrl: false, alt: false, shift: false }
@@ -85,8 +82,6 @@ export function loadSettings(): Settings {
     if (!raw) return base;
     const parsed = JSON.parse(raw) as Partial<Settings>;
     return {
-      nickname:
-        typeof parsed.nickname === "string" ? parsed.nickname : base.nickname,
       awakeEnabled:
         typeof parsed.awakeEnabled === "boolean"
           ? parsed.awakeEnabled
