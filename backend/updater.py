@@ -185,7 +185,7 @@ def _download(url: str, dest: str) -> None:
     _log(f"download dest={dest}")
     started = time.monotonic()
     request = urllib.request.Request(url, headers={"User-Agent": "oasis-updater"})
-    with urllib.request.urlopen(request, timeout=30) as response, open(dest, "wb") as out:
+    with urllib.request.urlopen(request, timeout=30, context=version._SSL_CONTEXT) as response, open(dest, "wb") as out:
         total = int(response.headers.get("Content-Length") or 0)
         _log(f"download http={response.status} content-length={total or 'unknown'}")
         received = 0

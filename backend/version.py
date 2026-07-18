@@ -26,12 +26,23 @@ whole install. See run_backend.py.
 
 import json
 import os
+import ssl
 import sys
 import urllib.request
+
+import certifi
 
 # Public repo the releases are published to. Used only to build the read-only
 # GitHub API / download URLs below.
 GITHUB_REPO = "fusion-labs-cc/oasis"
+
+# urlopen() consults OpenSSL's compiled-in default CA path, not the OS trust
+# store -- on the frozen macOS build that path is whatever the build Python
+# linked, and is empty unless "Install Certificates.command" was run on the
+# machine that built it. `requests`/selenium never hit this because they default
+# to certifi's bundle already; give urlopen the same bundle explicitly rather
+# than depend on the host's OpenSSL config.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
 
 # The OS-independent release asset holding just the backend source: the payload of
 # a light update. Carries its own VERSION and the RUNTIME it was built against.
@@ -177,7 +188,7 @@ def check_for_update(timeout: float = 6.0) -> dict:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_SSL_CONTEXT) as response:
             data = json.loads(response.read().decode("utf-8"))
     except Exception as exc:  # network down, rate-limited, no releases yet, ...
         result["error"] = f"無法檢查更新：{exc}"
