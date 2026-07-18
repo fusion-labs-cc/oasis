@@ -112,6 +112,22 @@ def get_video_name(driver, adapter: dict) -> str:
     return _clean_filename(title) or 'video'
 
 
+def get_video_actress(driver, adapter: dict) -> str | None:
+    """Scrape the cast name(s) via the adapter's actress selectors. Sites that
+    label the cast on the page beat the title-tail heuristic in catalog.py,
+    which cannot split an unspaced CJK title from the name."""
+    names: list[str] = []
+    for selector in adapter.get('actress_selectors', []):
+        try:
+            for el in driver.find_elements('css selector', selector):
+                t = el.text.strip()
+                if t and t not in names:
+                    names.append(t)
+        except Exception:
+            continue
+    return '、'.join(names) or None
+
+
 def get_video_tags(driver, adapter: dict) -> list:
     """Scrape tag labels via the adapter's tag selectors."""
     tags: list[str] = []
@@ -126,13 +142,24 @@ def get_video_tags(driver, adapter: dict) -> list:
     return tags
 
 
-def get_cover_url(driver) -> str | None:
-    """Scrape the cover image from the standard og:image meta tag."""
-    try:
-        el = driver.find_element('css selector', 'meta[property="og:image"]')
-        return el.get_attribute('content') or None
-    except Exception:
-        return None
+def get_cover_url(driver, adapter: dict | None = None) -> str | None:
+    """Scrape the cover image URL. Defaults to the standard og:image meta tag;
+    adapters whose pages lack it can point at any element/attribute instead
+    (cover.selectors). The first http(s) URL inside the attribute value is
+    taken, so a style="background-image: url(…)" works as-is."""
+    entries = ((adapter or {}).get('cover') or {}).get('selectors') or [
+        {'css': 'meta[property="og:image"]', 'attr': 'content'},
+    ]
+    for entry in entries:
+        try:
+            el = driver.find_element('css selector', entry['css'])
+            value = el.get_attribute(entry.get('attr', 'src')) or ''
+        except Exception:
+            continue
+        m = re.search(r'https?://[^\s"\')]+', value)
+        if m:
+            return m.group(0)
+    return None
 
 
 def _match_first(regexes, text):
@@ -156,36 +183,108 @@ def _intercept_m3u8_from_logs(driver):
     return None
 
 
+def _absolutize(driver, url):
+    """A playlist URL scraped out of player state may be relative — resolve it
+    against the document it came from, not the top page."""
+    if url.startswith('http'):
+        return url
+    try:
+        return urljoin(driver.execute_script('return location.href'), url)
+    except Exception:
+        return url
+
+
+def _match_in_document(driver, regexes, scripts):
+    """Match the current document: its DOM first, then the adapter's JS probes
+    (frame_scripts) — players like JWPlayer hold the playlist URL only in JS
+    state, never in markup."""
+    found = _match_first(regexes, driver.page_source)
+    if found:
+        return _absolutize(driver, found)
+    for script in scripts:
+        try:
+            text = driver.execute_script(script)
+        except Exception:
+            continue
+        if text:
+            found = _match_first(regexes, str(text))
+            if found:
+                return _absolutize(driver, found)
+    return None
+
+
+def _scan_frames_for_m3u8(driver, regexes, scripts, depth=0):
+    """Search nested iframes — page_source only covers the top document,
+    but embed players (JWPlayer et al.) keep the playlist URL in their own frame."""
+    if depth >= 3:
+        return None
+    count = len(driver.find_elements('css selector', 'iframe'))
+    for i in range(count):
+        # Re-find each time: switching frames staled the previous references.
+        frames = driver.find_elements('css selector', 'iframe')
+        if i >= len(frames):
+            break
+        try:
+            driver.switch_to.frame(frames[i])
+        except Exception:
+            continue
+        try:
+            found = _match_in_document(driver, regexes, scripts) \
+                or _scan_frames_for_m3u8(driver, regexes, scripts, depth + 1)
+        except Exception:
+            found = None
+        driver.switch_to.parent_frame()
+        if found:
+            return found
+    return None
+
+
+def _click_selector(driver, selector):
+    """click_selectors entries are CSS, or XPath behind an "xpath:" prefix —
+    needed to pick an element by its text (e.g. one server button of several),
+    which CSS cannot express."""
+    if selector.startswith('xpath:'):
+        driver.find_element('xpath', selector[len('xpath:'):]).click()
+    else:
+        driver.find_element('css selector', selector).click()
+
+
 def get_m3u8_url(driver, adapter: dict):
     """Extract the stream playlist URL using the adapter's configuration."""
     cfg = adapter.get('m3u8', {})
     regexes = cfg.get('regexes', [r'https?://[^\s"\']+\.m3u8[^\s"\']*'])
+    scripts = cfg.get('frame_scripts', [])
 
-    found = _match_first(regexes, driver.page_source)
-    if found:
+    def attempt():
+        found = _match_in_document(driver, regexes, scripts)
+        if not found and cfg.get('scan_iframes'):
+            try:
+                found = _scan_frames_for_m3u8(driver, regexes, scripts)
+            finally:
+                # Callers assume the driver is left on the top document.
+                driver.switch_to.default_content()
+        if not found and cfg.get('use_performance_log'):
+            found = _intercept_m3u8_from_logs(driver)
         return found
 
-    if cfg.get('use_performance_log'):
-        found = _intercept_m3u8_from_logs(driver)
-        if found:
-            return found
+    found = attempt()
+    if found:
+        return found
 
     retry = cfg.get('retry')
     if retry:
         print('等待頁面載入影片播放器...')
         time.sleep(retry.get('wait_seconds', 5))
-        for selector in retry.get('click_selectors', []):
-            try:
-                driver.find_element('css selector', selector).click()
-                time.sleep(retry.get('click_wait_seconds', 3))
-                break
-            except Exception:
-                continue
-        found = _match_first(regexes, driver.page_source)
-        if found:
-            return found
-        if cfg.get('use_performance_log'):
-            found = _intercept_m3u8_from_logs(driver)
+        # Multiple attempts: popunder ads routinely swallow the first click.
+        for _ in range(retry.get('attempts', 1)):
+            for selector in retry.get('click_selectors', []):
+                try:
+                    _click_selector(driver, selector)
+                    time.sleep(retry.get('click_wait_seconds', 3))
+                    break
+                except Exception:
+                    continue
+            found = attempt()
             if found:
                 return found
 

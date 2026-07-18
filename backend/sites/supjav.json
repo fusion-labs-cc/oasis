@@ -1,0 +1,58 @@
+{
+  "id": "supjav",
+  "name": "SupJav",
+  "display_domain": "supjav.com",
+  "domain_prefixes": [
+    "supjav"
+  ],
+  "title_selectors": [
+    "h1"
+  ],
+  "title_suffix_strip": [],
+  "tag_selectors": [
+    ".tags a"
+  ],
+  "actress_selectors": [
+    ".cats a[href*='/cast/']"
+  ],
+  "cover": {
+    "selectors": [
+      {"css": ".player-wrap", "attr": "style"},
+      {"css": "meta[property='og:image']", "attr": "content"}
+    ]
+  },
+  "headers": {
+    "Referer": "{page_url}"
+  },
+  "driver": {
+    "stealth": true
+  },
+  "wait": {
+    "seconds": 3,
+    "css": "h1",
+    "timeout": 15
+  },
+  "m3u8": {
+    "regexes": [
+      "https?://[^\\s\"']+\\.m3u8[^\\s\"']*",
+      "(?:source|src|file|url|hlsUrl|videoUrl)\\s*[:=]\\s*['\"]?(https?://[^\\s'\"]+\\.m3u8[^\\s'\"]*)",
+      "\"file\"\\s*:\\s*\"(/[^\"]+\\.m3u8[^\"]*)\""
+    ],
+    "scan_iframes": true,
+    "frame_scripts": [
+      "try { return JSON.stringify(jwplayer(document.querySelector('.jwplayer') || 0).getPlaylist()) } catch (e) { return '' }"
+    ],
+    "retry": {
+      "wait_seconds": 3,
+      "attempts": 5,
+      "click_selectors": [
+        "xpath://a[contains(@class,'btn-server') and normalize-space()='FST']",
+        "#vserver, .play-button"
+      ],
+      "click_wait_seconds": 8
+    }
+  },
+  "download": {
+    "strip_fake_header": true
+  }
+}

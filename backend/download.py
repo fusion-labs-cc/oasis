@@ -154,6 +154,7 @@ def download(url, progress_cb=None):
   prepareCrawl(
       contentKey, iv, folderPath, tsList, dl_headers,
       progress_cb=lambda done, total: _report(3 + done / total * 92),
+      strip_header=bool((adapter.get('download') or {}).get('strip_fake_header')),
   )
 
   # 合成mp4

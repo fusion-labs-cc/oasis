@@ -18,6 +18,15 @@
   "tag_selectors": [
     "a.tag"
   ],
+  "actress_selectors": [
+    "a[href*='/cast/']"
+  ],
+  "cover": {
+    "selectors": [
+      {"css": "meta[property='og:image']", "attr": "content"},
+      {"css": ".player-poster", "attr": "style"}
+    ]
+  },
   "headers": {
     "Referer": "{page_url}"
   },
@@ -35,12 +44,19 @@
       "https?://[^\\s\"']+\\.m3u8[^\\s\"']*"
     ],
     "use_performance_log": false,
+    "scan_iframes": false,
+    "frame_scripts": [],
     "retry": {
       "wait_seconds": 5,
+      "attempts": 1,
       "click_selectors": [
-        ".play-button"
+        ".play-button",
+        "xpath://a[normalize-space()='Server 2']"
       ],
       "click_wait_seconds": 3
     }
+  },
+  "download": {
+    "strip_fake_header": false
   }
 }

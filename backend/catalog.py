@@ -140,13 +140,32 @@ def extract_tags(raw_tags: list, code: str | None) -> list[str]:
     return sorted(tags)
 
 
+# Characters whose glyph exists only in Simplified Chinese (their traditional
+# forms differ). Ambiguous glyphs shared by both scripts (里, 后, 面, 云…) are
+# deliberately excluded — one hit must mean the text is Simplified.
+_SIMPLIFIED_ONLY = set(
+    '无码说体发记为这们买卖乐时门问闻见觉视观规览频线释认识译语请让谁谢诉读诞调谈证评词访设计许论'
+    '译试诗诚话询该详误说课谊谋谜谅红纪约级纳纯纸纹纺练组细织终绍经绑绕绘给绝统继绩维绵综缘编缠缩'
+    '钱铁银错钟钢销锁锦键镜饭饮饰馆马妈骂吗鸟鸡鸭鸣车轮转轻辆载页顶项顺须顾预领题颜贝财贫购贯贵费'
+    '贴贸资赏赛质败货贪贮员圆爱达迁过运还边逻阴阳际陆队团园围图国华伟传优侠仅从众长东冻陈击刘剑办'
+    '劝动务势医单卖压厅历厉参双变叠发叙叹后向吓吕启员响哑唤啸喷嘱严丧个丰临义乌乔习乡书争亏亚产亲'
+    '亿仪价会伞妇学写实审宽宾对导将尔尘尝尽层属岁岛巅币师带帮干广庄庆库应庙废开异弃张弹归当录彻径'
+    '恋恳恶悬惊惧愿态怀忆总离难电灵'
+    '极术处备复够夹奋娇孙宁冲减凤刚创荡骚兽独汉泽湿温环现疯睁瞒确碍万与专丝两关兴养热恼润涨烂牵猎穷'
+    '窝笔筹简类罚肠肤脑脏艳药触赶躯辞递选邻酱钻阅阵隐雾风'
+)
+
+
 def is_zh_tw(text: str) -> bool:
-    """Return True if text is already Traditional Chinese (no hiragana/katakana)."""
+    """Return True if text is already Traditional Chinese — CJK with no
+    hiragana/katakana and no simplified-only glyph. Simplified titles (supjav)
+    must fail this check, or they skip translation entirely."""
     if not text:
         return False
     has_cjk = bool(re.search(r'[一-鿿]', text))
     has_japanese = bool(re.search(r'[぀-ゟ゠-ヿ]', text))
-    return has_cjk and not has_japanese
+    has_simplified = any(c in _SIMPLIFIED_ONLY for c in text)
+    return has_cjk and not has_japanese and not has_simplified
 
 
 def has_japanese_kana(text: str) -> bool:
@@ -155,16 +174,33 @@ def has_japanese_kana(text: str) -> bool:
 
 
 def translate_to_zh_tw(text: str) -> str:
-    """Translate Japanese text to Traditional Chinese using deep-translator."""
+    """Translate to Traditional Chinese using deep-translator. Source is
+    auto-detected: titles arrive in Japanese (jable/missav) or Simplified
+    Chinese (supjav), and a hardcoded 'ja' source mistranslates the latter."""
     if not text:
         return ''
     try:
         from deep_translator import GoogleTranslator
-        result = GoogleTranslator(source='ja', target='zh-TW').translate(text)
+        result = GoogleTranslator(source='auto', target='zh-TW').translate(text)
         return result or text
     except Exception as e:
         print(f'⚠️  翻譯失敗: {e}')
         return text
+
+
+def translate_tags_to_zh_tw(tags: list[str]) -> list[str]:
+    """Convert Simplified-Chinese tags to zh-TW; every other tag passes
+    through untouched. The candidates go in one newline-joined request —
+    per-tag calls would cost a round-trip each — falling back to per-tag
+    only if the translator does not preserve the line structure."""
+    todo = [t for t in tags if any(c in _SIMPLIFIED_ONLY for c in t)]
+    if not todo:
+        return tags
+    parts = [p.strip() for p in translate_to_zh_tw('\n'.join(todo)).split('\n')]
+    if len(parts) != len(todo):
+        parts = [translate_to_zh_tw(t) for t in todo]
+    mapping = dict(zip(todo, parts))
+    return [mapping.get(t) or t for t in tags]
 
 
 # -- Database operations --------------------------------------------------------
@@ -508,7 +544,7 @@ def fetch_page_metadata(url: str) -> tuple:
     global _active_driver
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
-    from site_config import detect_site, get_cover_url, get_video_name, get_video_tags, setup_driver_for_site, wait_for_page_load
+    from site_config import detect_site, get_cover_url, get_video_actress, get_video_name, get_video_tags, setup_driver_for_site, wait_for_page_load
 
     adapter = detect_site(url)
 
@@ -531,11 +567,12 @@ def fetch_page_metadata(url: str) -> tuple:
 
         video_name = get_video_name(dr, adapter)
         raw_tags = get_video_tags(dr, adapter)
-        cover_url = get_cover_url(dr)
+        cover_url = get_cover_url(dr, adapter)
+        page_actress = get_video_actress(dr, adapter)
     finally:
         dr.quit()
         _active_driver = None
-    return video_name, raw_tags, cover_url
+    return video_name, raw_tags, cover_url, page_actress
 
 
 # -- Main logic -----------------------------------------------------------------
@@ -546,9 +583,13 @@ def find_local_file(code: str, title: str) -> str | None:
     if not os.path.isdir(movies_dir):
         return None
 
-    # Search for files that start with the code
+    # Match the code anywhere in the name, not just as a prefix: some sites
+    # (supjav) title their videos with a leading bracket tag, and the stored
+    # title has the code stripped out of it, so neither field prefix-matches.
+    # A code is unique per video, so a substring hit is the same video.
+    code_l = (code or '').lower()
     for item in os.listdir(movies_dir):
-        if item.startswith(code) or (title and item.startswith(title[:20])):
+        if (code_l and code_l in item.lower()) or (title and item.startswith(title[:20])):
             full = os.path.join(movies_dir, item)
             if os.path.isfile(full) and full.lower().endswith('.mp4'):
                 return os.path.relpath(full, MEDIA_ROOT)
@@ -568,14 +609,15 @@ def process_url(url: str, skip_download: bool = False):
 
     # Step 1: Fetch the title and tags from the page
     print('\n📡 正在取得影片資訊...')
-    full_title, raw_tags, cover_url = fetch_page_metadata(url)
+    full_title, raw_tags, cover_url, page_actress = fetch_page_metadata(url)
     print(f'   標題: {full_title}')
 
-    # Step 2: Extract metadata
+    # Step 2: Extract metadata. The page's own cast label, when the adapter
+    # scrapes one, beats guessing the name off the title's tail.
     code = extract_code(full_title)
-    actress = extract_actress(full_title, code)
+    actress = page_actress or extract_actress(full_title, code)
     title = extract_title(full_title, code, actress)
-    tags = extract_tags(raw_tags, code)
+    tags = translate_tags_to_zh_tw(extract_tags(raw_tags, code))
 
     print(f'\n📋 解析結果:')
     print(f'   片號:     {code or "（未偵測到）"}')
