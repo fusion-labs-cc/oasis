@@ -14,6 +14,11 @@ import ImportExportModal from "@/components/ImportExportModal";
 type DownloadFilter = "all" | "downloaded" | "not_downloaded";
 type SortKey = "added_desc" | "added_asc" | "plays_desc" | "plays_asc";
 
+const SORT_KEYS: SortKey[] = ["added_desc", "added_asc", "plays_desc", "plays_asc"];
+const DOWNLOAD_FILTERS: DownloadFilter[] = ["all", "downloaded", "not_downloaded"];
+const SORT_KEY_STORAGE = "oasis:sort_key";
+const DOWNLOAD_FILTER_STORAGE = "oasis:download_filter";
+
 function isDownloaded(v: VideoRecord): boolean {
   return Boolean(v.video_path && v.local_file_exists);
 }
@@ -132,6 +137,27 @@ export default function Home() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Restore the last-used sort/download-filter choice on mount, so a reload
+  // doesn't silently reset back to the defaults.
+  useEffect(() => {
+    const storedSort = localStorage.getItem(SORT_KEY_STORAGE);
+    if (storedSort && SORT_KEYS.includes(storedSort as SortKey)) {
+      setSortKey(storedSort as SortKey);
+    }
+    const storedFilter = localStorage.getItem(DOWNLOAD_FILTER_STORAGE);
+    if (storedFilter && DOWNLOAD_FILTERS.includes(storedFilter as DownloadFilter)) {
+      setDownloadFilter(storedFilter as DownloadFilter);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem(SORT_KEY_STORAGE, sortKey);
+  }, [sortKey]);
+
+  useEffect(() => {
+    localStorage.setItem(DOWNLOAD_FILTER_STORAGE, downloadFilter);
+  }, [downloadFilter]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
