@@ -11,6 +11,13 @@ import { useTasks } from "@/context/TasksContext";
 import SupportedSites from "@/components/SupportedSites";
 import ImportExportModal from "@/components/ImportExportModal";
 
+type DownloadFilter = "all" | "downloaded" | "not_downloaded";
+type SortKey = "added_desc" | "added_asc" | "plays_desc" | "plays_asc";
+
+function isDownloaded(v: VideoRecord): boolean {
+  return Boolean(v.video_path && v.local_file_exists);
+}
+
 export default function Home() {
   // Full catalog lives in the shared VideoContext so it survives navigation.
   // Filtering below is all client-side.
@@ -22,6 +29,8 @@ export default function Home() {
   const [match, setMatch] = useState<"all" | "any">("all");
   // Keyword search, driven by the Header's search bar via custom event.
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [downloadFilter, setDownloadFilter] = useState<DownloadFilter>("all");
+  const [sortKey, setSortKey] = useState<SortKey>("added_desc");
   // Mobile-only collapsible for the filter panel — the sidebar is xl-only.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -130,7 +139,7 @@ export default function Home() {
 
   const videos = useMemo(() => {
     const kw = searchKeyword.trim().toLowerCase();
-    return allVideos.filter((v) => {
+    const filtered = allVideos.filter((v) => {
       if (selectedActress && v.actress !== selectedActress) return false;
       if (selectedTags.length) {
         const tags = new Set(v.tags ?? []);
@@ -140,6 +149,8 @@ export default function Home() {
             : selectedTags.every((t) => tags.has(t));
         if (!ok) return false;
       }
+      if (downloadFilter === "downloaded" && !isDownloaded(v)) return false;
+      if (downloadFilter === "not_downloaded" && isDownloaded(v)) return false;
       // Keyword search: match against code, title (both languages), actress, tags.
       if (kw) {
         const haystack = [
@@ -156,7 +167,28 @@ export default function Home() {
       }
       return true;
     });
-  }, [allVideos, selectedActress, selectedTags, match, searchKeyword]);
+
+    // The backend already returns newest-first, so "added_desc" is a no-op sort
+    // — still run it through for a stable, explicit ordering.
+    const sorted = [...filtered].sort((a, b) => {
+      switch (sortKey) {
+        case "added_asc":
+          return (
+            new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
+          );
+        case "plays_desc":
+          return (b.play_count ?? 0) - (a.play_count ?? 0);
+        case "plays_asc":
+          return (a.play_count ?? 0) - (b.play_count ?? 0);
+        case "added_desc":
+        default:
+          return (
+            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
+          );
+      }
+    });
+    return sorted;
+  }, [allVideos, selectedActress, selectedTags, match, searchKeyword, downloadFilter, sortKey]);
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -172,9 +204,14 @@ export default function Home() {
     setSelectedActress(null);
     setSelectedTags([]);
     setSearchKeyword("");
+    setDownloadFilter("all");
   }
 
-  const hasFilters = selectedActress !== null || selectedTags.length > 0 || searchKeyword.trim().length > 0;
+  const hasFilters =
+    selectedActress !== null ||
+    selectedTags.length > 0 ||
+    searchKeyword.trim().length > 0 ||
+    downloadFilter !== "all";
 
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -444,7 +481,7 @@ export default function Home() {
                 </button>
               )}
               {/* Mobile filter toggle — the sidebar only exists at xl and up */}
-              {facets.actresses.length + facets.tags.length > 0 && (
+              {allVideos.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setFiltersOpen((prev) => !prev)}
@@ -455,9 +492,9 @@ export default function Home() {
                   }`}
                 >
                   篩選
-                  {selectedTags.length + (selectedActress ? 1 : 0) > 0 && (
+                  {selectedTags.length + (selectedActress ? 1 : 0) + (downloadFilter !== "all" ? 1 : 0) > 0 && (
                     <span className="ml-1 font-mono font-bold">
-                      {selectedTags.length + (selectedActress ? 1 : 0)}
+                      {selectedTags.length + (selectedActress ? 1 : 0) + (downloadFilter !== "all" ? 1 : 0)}
                     </span>
                   )}
                 </button>
@@ -527,6 +564,10 @@ export default function Home() {
                 toggleTag={toggleTag}
                 match={match}
                 setMatch={setMatch}
+                downloadFilter={downloadFilter}
+                setDownloadFilter={setDownloadFilter}
+                sortKey={sortKey}
+                setSortKey={setSortKey}
               />
             </div>
           )}
@@ -685,6 +726,10 @@ export default function Home() {
             toggleTag={toggleTag}
             match={match}
             setMatch={setMatch}
+            downloadFilter={downloadFilter}
+            setDownloadFilter={setDownloadFilter}
+            sortKey={sortKey}
+            setSortKey={setSortKey}
           />
         </div>
       </aside>
@@ -713,6 +758,10 @@ function FilterPanel({
   toggleTag,
   match,
   setMatch,
+  downloadFilter,
+  setDownloadFilter,
+  sortKey,
+  setSortKey,
 }: {
   facets: Facets;
   selectedActress: string | null;
@@ -721,9 +770,59 @@ function FilterPanel({
   toggleTag: (tag: string) => void;
   match: "all" | "any";
   setMatch: (m: "all" | "any") => void;
+  downloadFilter: DownloadFilter;
+  setDownloadFilter: (f: DownloadFilter) => void;
+  sortKey: SortKey;
+  setSortKey: (s: SortKey) => void;
 }) {
   return (
     <>
+      {/* Sort */}
+      <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
+        <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
+          排序方式
+        </span>
+        <select
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as SortKey)}
+          className="w-full rounded-lg border border-border-hairline bg-surface-elevated px-2.5 py-1.5 text-xs font-semibold text-text-secondary focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30 transition cursor-pointer"
+        >
+          <option value="added_desc">最新加入</option>
+          <option value="added_asc">最舊加入</option>
+          <option value="plays_desc">播放次數：高到低</option>
+          <option value="plays_asc">播放次數：低到高</option>
+        </select>
+      </div>
+
+      {/* Download status */}
+      <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
+        <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
+          下載狀態
+        </span>
+        <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
+          {(
+            [
+              ["all", "全部"],
+              ["downloaded", "已下載"],
+              ["not_downloaded", "未下載"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setDownloadFilter(key)}
+              className={`px-2 py-1.5 flex-1 text-center font-medium transition cursor-pointer ${
+                downloadFilter === key
+                  ? "bg-accent text-neutral-950 font-bold"
+                  : "text-text-secondary hover:bg-surface-highest"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Actress Filters */}
       {facets.actresses.length > 0 && (
         <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
@@ -970,6 +1069,22 @@ function VideoCard({
         ) : (
           <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface-highest to-surface-elevated text-xs font-mono font-bold text-text-tertiary">
             NO COVER
+          </div>
+        )}
+
+        {/* Download progress overlay: a filled bar once the backend reports a
+            percent, an indeterminate pulse while queued or before the first
+            percent arrives. */}
+        {isDownloading && (
+          <div className="absolute inset-x-0 bottom-0 z-10 h-1.5 bg-neutral-950/50 overflow-hidden">
+            {!video.download_queued && typeof video.download_progress === "number" ? (
+              <div
+                className="h-full bg-accent transition-all duration-700 ease-out shadow-[0_0_6px_rgba(16,185,129,0.6)]"
+                style={{ width: `${video.download_progress}%` }}
+              />
+            ) : (
+              <div className="h-full w-full bg-accent/60 animate-pulse" />
+            )}
           </div>
         )}
       </Link>

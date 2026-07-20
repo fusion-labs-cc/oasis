@@ -590,40 +590,46 @@ export default function VideoDetailPage() {
               />
             </>
           )}
-          
+
+          {/* Download progress overlay, matching the catalog card's thumbnail
+              bar: a filled bar once the backend reports a percent, an
+              indeterminate pulse while queued or before the first percent
+              arrives. */}
+          {isDownloading && (
+            <div className="absolute inset-x-0 bottom-0 z-10 h-1.5 bg-neutral-950/50 overflow-hidden">
+              {!video.download_queued && typeof video.download_progress === "number" ? (
+                <div
+                  className="h-full bg-accent transition-all duration-700 ease-out shadow-[0_0_6px_rgba(16,185,129,0.6)]"
+                  style={{ width: `${video.download_progress}%` }}
+                />
+              ) : (
+                <div className="h-full w-full bg-accent/60 animate-pulse" />
+              )}
+            </div>
+          )}
+
           <div className="relative z-10 flex flex-col items-center text-center px-6">
             <p className="text-text-secondary text-sm font-semibold mb-4">
               本地影片檔案不存在
             </p>
-            
+
             <div className="flex flex-wrap items-center justify-center gap-3">
               {isDownloading ? (
-                <div className="flex flex-col items-center gap-3">
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    <span className="inline-flex items-center gap-2 rounded-xl bg-accent/10 px-5 py-3 text-sm font-bold text-accent border border-accent/20 animate-pulse">
-                      <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
-                      {video.download_queued
-                        ? "排隊中，等待前一支下載完成..."
-                        : typeof video.download_progress === "number"
-                          ? `正在背景下載中 ${video.download_progress}%`
-                          : "正在背景下載中..."}
-                    </span>
-                    <button
-                      onClick={handleCancelDownload}
-                      className="rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-400 transition cursor-pointer"
-                    >
-                      取消下載
-                    </button>
-                  </div>
-                  {!video.download_queued &&
-                    typeof video.download_progress === "number" && (
-                      <div className="h-1.5 w-64 max-w-full overflow-hidden rounded-full bg-surface-highest">
-                        <div
-                          className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
-                          style={{ width: `${video.download_progress}%` }}
-                        />
-                      </div>
-                    )}
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <span className="inline-flex items-center gap-2 rounded-xl bg-accent/10 px-5 py-3 text-sm font-bold text-accent border border-accent/20 animate-pulse">
+                    <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+                    {video.download_queued
+                      ? "排隊中，等待前一支下載完成..."
+                      : typeof video.download_progress === "number"
+                        ? `正在背景下載中 ${video.download_progress}%`
+                        : "正在背景下載中..."}
+                  </span>
+                  <button
+                    onClick={handleCancelDownload}
+                    className="rounded-xl border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-400 transition cursor-pointer"
+                  >
+                    取消下載
+                  </button>
                 </div>
               ) : (
                 <button
