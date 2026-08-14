@@ -120,3 +120,24 @@ dialog[open] {
   border-radius: 0;
 }
 
+/* Fullscreen: Plyr already sizes itself (and the raw <video>) to fill the whole
+   screen, so the viewport caps above must be lifted — otherwise the player stops
+   ~8rem short of the bottom edge and leaves a black band there. Covers native
+   (:fullscreen) and Plyr's JS fallback, for both the standard and theater shells.
+   object-fit keeps a mismatched-aspect video letterboxed instead of stretched. */
+.player-shell .plyr:fullscreen,
+.player-shell .plyr--fullscreen-fallback,
+.theater .plyr:fullscreen,
+.theater .plyr--fullscreen-fallback {
+  max-height: none;
+  max-width: none;
+}
+.player-shell .plyr:fullscreen video,
+.player-shell .plyr--fullscreen-fallback video,
+.theater .plyr:fullscreen video,
+.theater .plyr--fullscreen-fallback video {
+  max-height: none;
+  max-width: none;
+  object-fit: contain;
+}
+
