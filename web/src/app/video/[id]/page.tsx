@@ -2,7 +2,7 @@
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
@@ -50,6 +50,37 @@ export default function VideoDetailPage() {
   const leaving = useRef(false);
 
   const isDownloading = downloading || video?.is_downloading;
+
+  // Find all episodes belonging to the same series, ordered by episode ascending, then id ascending
+  const seriesEpisodes = useMemo(() => {
+    if (!video) return [];
+    if (video.series_id != null) {
+      return videos
+        .filter((v) => v.series_id === video.series_id)
+        .sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0) || (a.id ?? 0) - (b.id ?? 0));
+    }
+    if (video.series) {
+      return videos
+        .filter((v) => v.series === video.series)
+        .sort((a, b) => (a.episode ?? 0) - (b.episode ?? 0) || (a.id ?? 0) - (b.id ?? 0));
+    }
+    return [];
+  }, [videos, video]);
+
+  const currentIndex = useMemo(() => {
+    if (!video?.id || seriesEpisodes.length === 0) return -1;
+    return seriesEpisodes.findIndex((v) => v.id === video.id);
+  }, [seriesEpisodes, video]);
+
+  const prevVideo = useMemo(() => {
+    return currentIndex > 0 ? seriesEpisodes[currentIndex - 1] : null;
+  }, [seriesEpisodes, currentIndex]);
+
+  const nextVideo = useMemo(() => {
+    return currentIndex >= 0 && currentIndex < seriesEpisodes.length - 1
+      ? seriesEpisodes[currentIndex + 1]
+      : null;
+  }, [seriesEpisodes, currentIndex]);
 
   // Tear down Plyr and hand React back the exact <video> node it rendered.
   // Plyr's destroy() replaces its container with a *clone* of the media, which
@@ -293,18 +324,25 @@ export default function VideoDetailPage() {
   }, []);
 
   // "t" toggles theater mode, YouTube-style (ignored while typing).
+  // "[" and "]" navigate between series episodes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
       if (e.key === "t" || e.key === "T") {
         e.preventDefault();
         setTheater((v) => !v);
+      } else if (e.key === "[" && prevVideo) {
+        e.preventDefault();
+        router.push(`/video/${prevVideo.id}`);
+      } else if (e.key === "]" && nextVideo) {
+        e.preventDefault();
+        router.push(`/video/${nextVideo.id}`);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [prevVideo, nextVideo, router]);
 
   // Log a play the first time playback starts on this page view.
   async function handlePlay() {
@@ -710,6 +748,109 @@ export default function VideoDetailPage() {
         </div>
       )}
 
+      {/* Series Episode Navigation */}
+      {(video.series_id != null || video.series) && (prevVideo || nextVideo || seriesEpisodes.length > 1) && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border-hairline bg-surface-elevated p-3 sm:px-5 shadow-xl">
+          {prevVideo ? (
+            <Link
+              href={`/video/${prevVideo.id}`}
+              title={`上一集 (快捷鍵: [)：${prevVideo.code}${prevVideo.title ? ` - ${prevVideo.title}` : ""} ${prevVideo.local_file_exists ? "(已下載)" : "(未下載)"}`}
+              className="inline-flex items-center gap-2 rounded-xl border border-border-hairline bg-surface-highest hover:bg-border-hairline px-3.5 py-2 sm:px-4 sm:py-2.5 text-xs font-semibold text-text-primary transition shadow-sm hover:border-accent/40 cursor-pointer"
+            >
+              <span className="text-sm font-bold">←</span>
+              <span>上一集</span>
+              <kbd className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-mono font-bold text-text-tertiary border border-border-hairline shadow-xs">
+                [
+              </kbd>
+              {prevVideo.episode != null ? (
+                <span className="rounded-lg bg-surface-elevated px-2 py-0.5 text-[11px] font-mono text-accent border border-border-hairline">
+                  第 {prevVideo.episode} 集
+                </span>
+              ) : (
+                <span className="rounded-lg bg-surface-elevated px-2 py-0.5 text-[11px] font-mono text-text-secondary border border-border-hairline max-w-[90px] truncate">
+                  {prevVideo.code}
+                </span>
+              )}
+              {!prevVideo.local_file_exists && (
+                <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400/90 border border-amber-500/20">
+                  未下載
+                </span>
+              )}
+            </Link>
+          ) : (
+            <button
+              disabled
+              className="inline-flex items-center gap-2 rounded-xl border border-border-hairline bg-surface-highest/30 px-3.5 py-2 sm:px-4 sm:py-2.5 text-xs font-semibold text-text-tertiary opacity-40 cursor-not-allowed"
+            >
+              <span className="text-sm">←</span>
+              <span>上一集</span>
+              <kbd className="rounded bg-surface-elevated/50 px-1.5 py-0.5 text-[10px] font-mono font-bold text-text-tertiary/60 border border-border-hairline/50">
+                [
+              </kbd>
+            </button>
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-text-secondary font-sans">
+            <span className="text-text-tertiary font-medium">系列：</span>
+            {video.series_id != null ? (
+              <Link
+                href={`/series/${video.series_id}`}
+                className="font-bold text-accent hover:underline flex items-center gap-1.5"
+                title={`查看系列「${video.series || ""}」`}
+              >
+                <span>{video.series}</span>
+              </Link>
+            ) : (
+              <span className="font-bold text-accent">{video.series}</span>
+            )}
+            {seriesEpisodes.length > 0 && (
+              <span className="text-[11px] text-text-tertiary font-mono">
+                ({currentIndex + 1} / {seriesEpisodes.length})
+              </span>
+            )}
+          </div>
+
+          {nextVideo ? (
+            <Link
+              href={`/video/${nextVideo.id}`}
+              title={`下一集 (快捷鍵: ])：${nextVideo.code}${nextVideo.title ? ` - ${nextVideo.title}` : ""} ${nextVideo.local_file_exists ? "(已下載)" : "(未下載)"}`}
+              className="inline-flex items-center gap-2 rounded-xl border border-border-hairline bg-surface-highest hover:bg-border-hairline px-3.5 py-2 sm:px-4 sm:py-2.5 text-xs font-semibold text-text-primary transition shadow-sm hover:border-accent/40 cursor-pointer"
+            >
+              <span>下一集</span>
+              <kbd className="rounded bg-surface-elevated px-1.5 py-0.5 text-[10px] font-mono font-bold text-text-tertiary border border-border-hairline shadow-xs">
+                ]
+              </kbd>
+              {nextVideo.episode != null ? (
+                <span className="rounded-lg bg-surface-elevated px-2 py-0.5 text-[11px] font-mono text-accent border border-border-hairline">
+                  第 {nextVideo.episode} 集
+                </span>
+              ) : (
+                <span className="rounded-lg bg-surface-elevated px-2 py-0.5 text-[11px] font-mono text-text-secondary border border-border-hairline max-w-[90px] truncate">
+                  {nextVideo.code}
+                </span>
+              )}
+              {!nextVideo.local_file_exists && (
+                <span className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400/90 border border-amber-500/20">
+                  未下載
+                </span>
+              )}
+              <span className="text-sm font-bold">→</span>
+            </Link>
+          ) : (
+            <button
+              disabled
+              className="inline-flex items-center gap-2 rounded-xl border border-border-hairline bg-surface-highest/30 px-3.5 py-2 sm:px-4 sm:py-2.5 text-xs font-semibold text-text-tertiary opacity-40 cursor-not-allowed"
+            >
+              <span>下一集</span>
+              <kbd className="rounded bg-surface-elevated/50 px-1.5 py-0.5 text-[10px] font-mono font-bold text-text-tertiary/60 border border-border-hairline/50">
+                ]
+              </kbd>
+              <span className="text-sm font-bold">→</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Video Info */}
       <div className="mt-8 rounded-2xl border border-border-hairline bg-surface-elevated p-4 sm:p-6 shadow-xl">
         {editingDetails ? (
@@ -856,10 +997,10 @@ export default function VideoDetailPage() {
                   title={`查看系列「${video.series}」`}
                   className="hover:text-accent transition"
                 >
-                  {video.series}
+                  {video.series} {video.episode != null ? `(第 ${video.episode} 集)` : ''}
                 </Link>
               ) : (
-                <span>{video.series}</span>
+                <span>{video.series} {video.episode != null ? `(第 ${video.episode} 集)` : ''}</span>
               )
             )}
             {!video.actress && !video.series && (
