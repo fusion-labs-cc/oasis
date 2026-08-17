@@ -1,6 +1,7 @@
 {
   "id": "missav",
   "name": "MissAV",
+  "category": "av",
   "display_domain": "missav.ws",
   "domain_prefixes": [
     "missav"

@@ -106,6 +106,40 @@ export function isAnime1Url(url?: string | null): boolean {
   }
 }
 
+export function getVideoCategory(url?: string | null): "general" | "av" {
+  if (!url) return "av";
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "youtu.be" ||
+      host === "anime1.me" ||
+      host.endsWith(".anime1.me")
+    ) {
+      return "general";
+    }
+  } catch {
+    // ignore
+  }
+  return "av";
+}
+
+export function getSiteName(url?: string | null): string {
+  if (!url) return "";
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("youtube") || host === "youtu.be") return "YouTube";
+    if (host.includes("anime1")) return "Anime1";
+    if (host.includes("jable")) return "Jable";
+    if (host.includes("missav")) return "MissAV";
+    if (host.includes("supjav")) return "SupJav";
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
 // The URL to display a video's cover in an <img>/poster. Prefer the backend's
 // cached copy (served locally, survives a dead origin, and — like streaming —
 // carries the code as ?token= since <img> can send no header); the endpoint
@@ -375,6 +409,7 @@ export interface SupportedSite {
   id: string;
   name: string;
   domain: string;
+  category?: "general" | "av";
 }
 
 // Fetch the list of sites the backend's URL analyser supports.

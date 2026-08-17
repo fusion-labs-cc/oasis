@@ -8,6 +8,8 @@ import {
   cancelDownload,
   openInPlayer,
   safeExternalHref,
+  getVideoCategory,
+  getSiteName,
   type VideoRecord,
 } from "@/lib/api";
 import { useToast } from "@/components/Toast";
@@ -153,6 +155,23 @@ export default function VideoCard({
             NO COVER
           </div>
         )}
+
+        {/* Site / Category Badge */}
+        {(() => {
+          const category = getVideoCategory(video.url);
+          const siteName = getSiteName(video.url);
+          return (
+            <div
+              className={`absolute right-2 top-2 z-10 rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider shadow-sm backdrop-blur-md border ${
+                category === "general"
+                  ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
+                  : "bg-purple-950/80 text-purple-300 border-purple-500/30"
+              }`}
+            >
+              {siteName || (category === "general" ? "一般" : "AV")}
+            </div>
+          );
+        })()}
 
         {/* Download progress overlay: a filled bar once the backend reports a
             percent, an indeterminate pulse while queued or before the first

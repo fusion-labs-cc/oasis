@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { fetchSupportedSites, SupportedSite } from "@/lib/api";
 import { useBackend } from "@/context/BackendContext";
 
@@ -32,19 +33,21 @@ function loadOnce(): Promise<SupportedSite[]> {
  * so it degrades quietly when the backend is unreachable.
  */
 export default function SupportedSites({
+  category: propCategory,
   label = "目前支援",
   className = "",
 }: {
+  category?: "general" | "av";
   label?: string;
   className?: string;
 }) {
   const { status } = useBackend();
+  const pathname = usePathname();
   const [sites, setSites] = useState<SupportedSite[]>(cache ?? []);
 
-  // Only reach the backend once it's actually connected. This component renders
-  // in the home hero, which mounts *beneath* the OasisGate overlay — without this
-  // guard it would hit /api/supported-sites while the user is still at the gate,
-  // before they've connected. Gate the fetch on "up" like VideoContext does.
+  const activeCategory = propCategory || (pathname === "/adult" ? "av" : "general");
+
+  // Only reach the backend once it's actually connected.
   useEffect(() => {
     if (status !== "up") return;
     let alive = true;
@@ -60,19 +63,28 @@ export default function SupportedSites({
 
   if (sites.length === 0) return null;
 
+  const filteredSites = sites.filter((s) => {
+    const isGeneral = s.category === "general" || s.id === "youtube" || s.id === "anime1";
+    return activeCategory === "general" ? isGeneral : !isGeneral;
+  });
+
+  if (filteredSites.length === 0) return null;
+
   return (
-    <div
-      className={`flex flex-wrap items-center gap-1.5 text-[11px] text-text-tertiary font-sans ${className}`}
-    >
-      <span>{label}：</span>
-      {sites.map((s) => (
+    <div className={`flex flex-wrap items-center gap-1.5 text-[11px] text-text-tertiary font-sans ${className}`}>
+      {label && <span>{label}：</span>}
+      {filteredSites.map((s) => (
         <a
           key={s.id}
           href={`https://${s.domain}`}
           target="_blank"
           rel="noopener noreferrer"
           title={`前往 ${s.domain}`}
-          className="rounded-md border border-border-hairline bg-surface-highest px-2 py-0.5 text-text-secondary transition hover:border-accent/40 hover:text-accent cursor-pointer"
+          className={`rounded-md border px-2 py-0.5 transition cursor-pointer ${
+            activeCategory === "general"
+              ? "border-emerald-500/20 bg-emerald-950/30 text-emerald-300 hover:border-emerald-500/50 hover:text-emerald-200"
+              : "border-purple-500/20 bg-purple-950/30 text-purple-300 hover:border-purple-500/50 hover:text-purple-200"
+          }`}
         >
           {s.name}
         </a>

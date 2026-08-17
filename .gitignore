@@ -10,6 +10,7 @@ __pycache__/
 /oasis-portal-win64.zip
 
 # Media & temp
+movies/
 *.mp4
 *.jpg
 *.m3u8

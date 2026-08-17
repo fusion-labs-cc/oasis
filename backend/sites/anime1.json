@@ -1,6 +1,7 @@
 {
   "id": "anime1",
   "name": "Anime1",
+  "category": "general",
   "display_domain": "anime1.me",
   "domains": ["anime1.me"],
   "title_selectors": ["h2.entry-title"],

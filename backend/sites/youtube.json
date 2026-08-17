@@ -1,6 +1,7 @@
 {
   "id": "youtube",
   "name": "YouTube",
+  "category": "general",
   "display_domain": "youtube.com",
   "domains": [
     "youtube.com",

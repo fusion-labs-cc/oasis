@@ -56,7 +56,10 @@ def supported_sites() -> list[dict]:
             domain = a['domains'][0]
         elif not domain and a.get('domain_prefixes'):
             domain = a['domain_prefixes'][0]
-        out.append({'id': a['id'], 'name': a['name'], 'domain': domain or ''})
+        cat = a.get('category')
+        if not cat:
+            cat = 'general' if a.get('id') in ('youtube', 'anime1') else 'av'
+        out.append({'id': a['id'], 'name': a['name'], 'domain': domain or '', 'category': cat})
     return out
 
 

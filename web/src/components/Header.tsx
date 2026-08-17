@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import BackendStatus from "./BackendStatus";
 import OasisLogo from "./OasisLogo";
 import AddVideoModal from "./AddVideoModal";
 import ImportExportModal from "./ImportExportModal";
 import { useVideos } from "@/context/VideoContext";
 import { useToast } from "@/components/Toast";
+import { getVideoCategory } from "@/lib/api";
 import { formatHotkey, matchesHotkey, useIsMac, useSettings } from "@/lib/settings";
 
 // The five header actions, shared between the desktop row and the mobile
@@ -195,18 +196,27 @@ export default function Header() {
   const awakeKey = formatHotkey(settings.awakeHotkey, isMac);
 
   const router = useRouter();
+  const pathname = usePathname();
   const { videos } = useVideos();
   const toast = useToast();
 
   // Pick a random already-downloaded video and jump to its detail page.
   // "Downloaded" mirrors the VideoCard check: a local file that still exists.
   function handleRandomPick() {
-    const downloaded = videos.filter((v) => v.video_path && v.local_file_exists);
-    if (downloaded.length === 0) {
+    const isAdultRoute = pathname === "/adult";
+    const targetCat = isAdultRoute ? "av" : "general";
+    const categoryDownloaded = videos.filter(
+      (v) => v.video_path && v.local_file_exists && getVideoCategory(v.url) === targetCat
+    );
+    const pool =
+      categoryDownloaded.length > 0
+        ? categoryDownloaded
+        : videos.filter((v) => v.video_path && v.local_file_exists);
+    if (pool.length === 0) {
       toast("目前沒有已下載的影片可供隨機播放", { type: "info" });
       return;
     }
-    const pick = downloaded[Math.floor(Math.random() * downloaded.length)];
+    const pick = pool[Math.floor(Math.random() * pool.length)];
     router.push(`/video/${pick.id}`);
   }
 
@@ -255,13 +265,39 @@ export default function Header() {
       <header className="sticky top-0 z-45 border-b border-border-hairline bg-background/80 backdrop-blur-md">
         <div className="relative mx-auto w-full max-w-[1680px]">
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 lg:px-8">
-            <Link
-              href="/"
-              className="group flex items-center gap-2 font-mono text-lg font-black tracking-[0.15em] text-text-primary transition hover:text-accent sm:text-xl sm:tracking-[0.25em]"
-            >
-              <OasisLogo className="h-6 w-6 shrink-0 transition-transform duration-300 group-hover:rotate-[8deg] group-hover:scale-105 sm:h-7 sm:w-7" />
-              OASIS
-            </Link>
+            <div className="flex items-center gap-4 sm:gap-6">
+              <Link
+                href="/"
+                className="group flex items-center gap-2 font-mono text-lg font-black tracking-[0.15em] text-text-primary transition hover:text-accent sm:text-xl sm:tracking-[0.25em]"
+              >
+                <OasisLogo className="h-6 w-6 shrink-0 transition-transform duration-300 group-hover:rotate-[8deg] group-hover:scale-105 sm:h-7 sm:w-7" />
+                OASIS
+              </Link>
+
+              {/* Category Route Navigation Tabs */}
+              <nav className="hidden sm:flex items-center gap-1 bg-surface-elevated/80 p-1 rounded-xl border border-border-hairline text-xs font-semibold">
+                <Link
+                  href="/"
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    pathname !== "/adult"
+                      ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
+                      : "text-text-tertiary hover:text-text-primary"
+                  }`}
+                >
+                  一般影音
+                </Link>
+                <Link
+                  href="/adult"
+                  className={`px-3 py-1.5 rounded-lg transition ${
+                    pathname === "/adult"
+                      ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
+                      : "text-text-tertiary hover:text-text-primary"
+                  }`}
+                >
+                  成人影音
+                </Link>
+              </nav>
+            </div>
 
             {/* Status pill is always visible; the actions live inline on md+
                 and collapse behind the hamburger below that. */}
@@ -307,7 +343,31 @@ export default function Header() {
           {/* Mobile hamburger panel, anchored under the header row */}
           {menuOpen && (
             <div className="absolute inset-x-0 top-full border-b border-border-hairline bg-background/95 backdrop-blur-md md:hidden">
-              <div className="flex flex-col gap-1.5 p-4">
+              <div className="flex flex-col gap-2 p-4">
+                <div className="flex items-center gap-1 bg-surface-elevated p-1 rounded-xl border border-border-hairline text-xs font-semibold mb-1">
+                  <Link
+                    href="/"
+                    onClick={() => setMenuOpen(false)}
+                    className={`flex-1 text-center py-2 rounded-lg transition ${
+                      pathname !== "/adult"
+                        ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
+                        : "text-text-tertiary hover:text-text-primary"
+                    }`}
+                  >
+                    一般影音
+                  </Link>
+                  <Link
+                    href="/adult"
+                    onClick={() => setMenuOpen(false)}
+                    className={`flex-1 text-center py-2 rounded-lg transition ${
+                      pathname === "/adult"
+                        ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
+                        : "text-text-tertiary hover:text-text-primary"
+                    }`}
+                  >
+                    成人影音
+                  </Link>
+                </div>
                 <HeaderActions
                   vertical
                   onAction={() => setMenuOpen(false)}
