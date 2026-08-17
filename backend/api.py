@@ -16,6 +16,10 @@ import os
 import sys
 import asyncio
 import webbrowser
+import re
+import time
+import urllib.parse
+import requests
 
 from fastapi import FastAPI, HTTPException, Request, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse, Response, RedirectResponse
@@ -1429,8 +1433,6 @@ _anime1_stream_cache: dict[int, dict] = {}
 
 
 def get_anime1_stream_info(page_url: str) -> tuple[str, dict]:
-    import urllib.parse
-    import requests
     session = requests.Session()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
@@ -1438,9 +1440,10 @@ def get_anime1_stream_info(page_url: str) -> tuple[str, dict]:
     }
     r = session.get(page_url, headers=headers, timeout=10)
     r.raise_for_status()
-    apireq = re.search(r'data-apireq="([^"]+)"', r.text)
+
+    apireq = re.search(r'data-apireq=["\']([^"\']+)["\']', r.text)
     if not apireq:
-        raise HTTPException(status_code=400, detail='無法取得 Anime1 影片 Token')
+        raise HTTPException(status_code=400, detail='無法取得 Anime1 影片 Token (請確認網址為單集頁面)')
 
     token = urllib.parse.unquote(apireq.group(1))
     api_resp = session.post(
@@ -1452,7 +1455,7 @@ def get_anime1_stream_info(page_url: str) -> tuple[str, dict]:
     api_resp.raise_for_status()
     data = api_resp.json()
 
-    if not data.get('s') or not data['s'][0].get('src'):
+    if not data.get('s') or not isinstance(data['s'], list) or not data['s'] or not data['s'][0].get('src'):
         raise HTTPException(status_code=400, detail='Anime1 影片來源解析失敗')
 
     src = data['s'][0]['src']
@@ -1483,6 +1486,8 @@ def stream_online_video(video_id: int, request: Request):
         else:
             try:
                 stream_url, cookies = get_anime1_stream_info(url)
+            except HTTPException:
+                raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f'解析 Anime1 串流失敗: {e}')
             _anime1_stream_cache[video_id] = {
@@ -1505,6 +1510,8 @@ def stream_online_video(video_id: int, request: Request):
             _anime1_stream_cache.pop(video_id, None)
             try:
                 stream_url, cookies = get_anime1_stream_info(url)
+            except HTTPException:
+                raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f'解析 Anime1 串流失敗: {e}')
             _anime1_stream_cache[video_id] = {
