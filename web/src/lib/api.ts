@@ -142,6 +142,38 @@ export function safeExternalHref(url: string | null | undefined): string | undef
   return undefined;
 }
 
+// Extract YouTube embed URL from various YouTube link formats
+export function getYouTubeEmbedUrl(url?: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (host === "youtu.be") {
+      const id = parsed.pathname.slice(1).split("/")[0];
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+
+    if (host === "youtube.com" || host === "m.youtube.com" || host === "music.youtube.com") {
+      if (parsed.pathname === "/watch") {
+        const v = parsed.searchParams.get("v");
+        return v ? `https://www.youtube.com/embed/${v}` : null;
+      }
+      if (parsed.pathname.startsWith("/embed/")) {
+        const id = parsed.pathname.split("/")[2];
+        return id ? `https://www.youtube.com/embed/${id}` : null;
+      }
+      if (parsed.pathname.startsWith("/shorts/")) {
+        const id = parsed.pathname.split("/")[2];
+        return id ? `https://www.youtube.com/embed/${id}` : null;
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 // Max time to wait for a health check before treating the backend as down.
 // Keeps an unreachable (silently dropped) host from hanging the "connecting"
 // state indefinitely.

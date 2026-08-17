@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, fetchSeries, type SeriesRecord } from "@/lib/api";
+import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, fetchSeries, getYouTubeEmbedUrl, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
@@ -561,6 +561,8 @@ export default function VideoDetailPage() {
     );
   }
 
+  const youtubeEmbedUrl = getYouTubeEmbedUrl(video?.url);
+
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 md:px-8 md:py-6">
       {/* Video Player */}
@@ -586,9 +588,25 @@ export default function VideoDetailPage() {
             </video>
           </div>
         </div>
-      ) : null}
-
-      {(!video.video_path || !video.local_file_exists) && (
+      ) : youtubeEmbedUrl ? (
+        <div
+          className={
+            theater
+              ? "theater relative left-1/2 w-screen -translate-x-1/2 bg-black"
+              : "player-shell overflow-hidden rounded-2xl bg-black shadow-2xl border border-border-hairline"
+          }
+        >
+          <div className={theater ? "mx-auto flex justify-center" : "flex justify-center"}>
+            <iframe
+              src={`${youtubeEmbedUrl}?autoplay=0&rel=0`}
+              title={video.title || video.code}
+              className="w-full aspect-video max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] border-0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      ) : (
         <div className="relative mx-auto aspect-video w-full max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] overflow-hidden rounded-2xl border border-border-hairline bg-surface-elevated flex flex-col items-center justify-center shadow-2xl">
           {mounted && coverUrl(video) && (
             <>
