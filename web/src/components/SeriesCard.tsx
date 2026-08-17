@@ -18,7 +18,23 @@ export default function SeriesCard({
   seriesObj,
   onEditCover,
 }: SeriesCardProps) {
-  const seriesCover = seriesObj ? seriesCoverUrl(seriesObj) : null;
+  const seriesCover = seriesObj
+    ? seriesCoverUrl(seriesObj)
+    : episodes.find((e) => e.series_cover || e.series_has_cover)
+    ? seriesCoverUrl({
+        id,
+        cover: episodes.find((e) => e.series_cover)?.series_cover,
+        has_cover: episodes.some((e) => e.series_has_cover),
+      })
+    : null;
+
+  const hasSeriesCover = Boolean(
+    seriesCover ||
+      seriesObj?.cover ||
+      seriesObj?.has_cover ||
+      episodes.some((e) => e.series_cover || e.series_has_cover)
+  );
+
   const cover = seriesCover || (episodes.map(coverUrl).find(Boolean) ?? null);
   const downloaded = episodes.filter(isDownloaded).length;
   const active = episodes.filter((e) => e.is_downloading).length;
@@ -48,7 +64,7 @@ export default function SeriesCard({
         </Link>
 
         <div className="absolute right-2 top-2 flex items-center gap-1.5 z-10">
-          {onEditCover && (
+          {onEditCover && !hasSeriesCover && (
             <button
               type="button"
               onClick={(e) => {
@@ -79,7 +95,7 @@ export default function SeriesCard({
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-center justify-between">
           <span className="font-mono text-xs font-bold text-accent">系列</span>
-          {onEditCover && (
+          {onEditCover && !hasSeriesCover && (
             <button
               type="button"
               onClick={() => onEditCover(name)}

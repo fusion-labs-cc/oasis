@@ -1108,7 +1108,10 @@ def process_listing_url(url: str) -> list[dict]:
     adapter, entries, series_name = _fetch_listing_entries(url)
     if not entries:
         raise ValueError('此頁面沒有找到任何影片，請確認網址是否為列表頁')
-    print(f'   共 {len(entries)} 個項目')
+    records = []
+    # Listings default to newest-first unless the adapter specifies order: "asc".
+    listing_cfg = adapter.get('listing') or {}
+    ordered_entries = entries if listing_cfg.get('order') == 'asc' else list(reversed(entries))
 
     # Group the whole listing under a series so episode order survives. Failing
     # to create it is not worth losing the episodes over — they just land
@@ -1116,15 +1119,34 @@ def process_listing_url(url: str) -> list[dict]:
     series_id = None
     if series_name:
         try:
-            series_id = create_series(series_name)['id']
+            # Use the first video's cover as the series cover if the listing itself does not carry one (e.g. YouTube playlists)
+            first_cover = None
+            for entry in ordered_entries:
+                if entry.get('cover'):
+                    first_cover = entry['cover']
+                    break
+
+            s_rec = create_series(series_name, cover=first_cover)
+            series_id = s_rec['id']
+
+            # If the series already existed without a cover, update it with first_cover if available
+            if first_cover and not s_rec.get('cover') and not s_rec.get('has_cover'):
+                update_series(series_id, cover=first_cover)
+
+            # Pre-fetch and cache the series cover image bytes into the database
+            current_s = get_series_by_id(series_id)
+            if current_s and current_s.get('cover') and not current_s.get('has_cover'):
+                try:
+                    fetched = fetch_cover_image(current_s['cover'])
+                    if fetched:
+                        data, mime = fetched
+                        store_series_cover_image(series_id, data, mime)
+                except Exception:
+                    pass
+
             print(f'   系列: {series_name}')
         except Exception as e:
             print(f'⚠️  建立系列失敗（{series_name}）: {e}')
-
-    records = []
-    # Listings default to newest-first unless the adapter specifies order: "asc".
-    listing_cfg = adapter.get('listing') or {}
-    ordered_entries = entries if listing_cfg.get('order') == 'asc' else list(reversed(entries))
 
     for episode_no, entry in enumerate(ordered_entries, start=1):
         full_title = (entry.get('title') or '').strip()
