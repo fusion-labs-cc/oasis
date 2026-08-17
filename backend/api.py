@@ -1425,74 +1425,6 @@ def stream_series_cover(series_id: int):
     raise HTTPException(status_code=404, detail='封面不存在')
 
 
-@app.get('/api/stream/{video_id}')
-def stream_video(video_id: int, request: Request):
-    """Stream a local video file by video ID."""
-    record = catalog.get_video_by_id(video_id)
-    if not record:
-        raise HTTPException(status_code=404, detail='影片不存在')
-
-    # video_path is DB-supplied (and /api/import lets a caller write one), so it
-    # has to be re-checked against MEDIA_ROOT here exactly as delete/open do —
-    # otherwise a crafted "../../.." row turns this into an arbitrary file read.
-    rel_path = record.get('video_path')
-    video_path = os.path.abspath(os.path.join(MEDIA_ROOT, rel_path)) if rel_path else None
-
-    if (
-        not video_path
-        or not video_path.startswith(MEDIA_ROOT + os.sep)
-        or not os.path.isfile(video_path)
-    ):
-        raise HTTPException(status_code=404, detail='本地影片檔案不存在')
-
-    file_size = os.path.getsize(video_path)
-    filename = os.path.basename(video_path)
-    import urllib.parse
-    encoded_filename = urllib.parse.quote(filename)
-
-    range_header = request.headers.get('range')
-    if range_header:
-        byte_range = range_header.replace('bytes=', '').split('-')
-        start = int(byte_range[0]) if byte_range[0] else 0
-        end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
-    else:
-        start = 0
-        end = file_size - 1
-
-    length = end - start + 1
-
-    def iterfile():
-        with open(video_path, 'rb') as f:
-            f.seek(start)
-            remaining = length
-            while remaining > 0:
-                chunk_size = min(1024 * 1024, remaining)
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    headers = {
-        'Content-Length': str(length),
-        'Content-Disposition': f"inline; filename*=utf-8''{encoded_filename}",
-        'Accept-Ranges': 'bytes',
-    }
-
-    if range_header:
-        headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
-        status_code = 206
-    else:
-        status_code = 200
-
-    return StreamingResponse(
-        iterfile(),
-        media_type='video/mp4',
-        headers=headers,
-        status_code=status_code
-    )
-
-
 _anime1_stream_cache: dict[int, dict] = {}
 
 
@@ -1607,5 +1539,74 @@ def stream_online_video(video_id: int, request: Request):
         )
 
     raise HTTPException(status_code=400, detail='此網站不支援線上串流播放')
+
+
+@app.get('/api/stream/{video_id}')
+def stream_video(video_id: int, request: Request):
+    """Stream a local video file by video ID."""
+    record = catalog.get_video_by_id(video_id)
+    if not record:
+        raise HTTPException(status_code=404, detail='影片不存在')
+
+    # video_path is DB-supplied (and /api/import lets a caller write one), so it
+    # has to be re-checked against MEDIA_ROOT here exactly as delete/open do —
+    # otherwise a crafted "../../.." row turns this into an arbitrary file read.
+    rel_path = record.get('video_path')
+    video_path = os.path.abspath(os.path.join(MEDIA_ROOT, rel_path)) if rel_path else None
+
+    if (
+        not video_path
+        or not video_path.startswith(MEDIA_ROOT + os.sep)
+        or not os.path.isfile(video_path)
+    ):
+        raise HTTPException(status_code=404, detail='本地影片檔案不存在')
+
+    file_size = os.path.getsize(video_path)
+    filename = os.path.basename(video_path)
+    import urllib.parse
+    encoded_filename = urllib.parse.quote(filename)
+
+    range_header = request.headers.get('range')
+    if range_header:
+        byte_range = range_header.replace('bytes=', '').split('-')
+        start = int(byte_range[0]) if byte_range[0] else 0
+        end = int(byte_range[1]) if len(byte_range) > 1 and byte_range[1] else file_size - 1
+    else:
+        start = 0
+        end = file_size - 1
+
+    length = end - start + 1
+
+    def iterfile():
+        with open(video_path, 'rb') as f:
+            f.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk_size = min(1024 * 1024, remaining)
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        'Content-Length': str(length),
+        'Content-Disposition': f"inline; filename*=utf-8''{encoded_filename}",
+        'Accept-Ranges': 'bytes',
+    }
+
+    if range_header:
+        headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+        status_code = 206
+    else:
+        status_code = 200
+
+    return StreamingResponse(
+        iterfile(),
+        media_type='video/mp4',
+        headers=headers,
+        status_code=status_code
+    )
+
 
 
