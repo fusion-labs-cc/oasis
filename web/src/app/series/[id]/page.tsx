@@ -13,6 +13,7 @@ import {
   downloadVideo,
   cancelSeriesDownloads,
   deleteSeries,
+  getVideoCategory,
   type SeriesRecord,
   type VideoRecord,
 } from "@/lib/api";
@@ -20,6 +21,7 @@ import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
+import { useMode } from "@/context/ModeContext";
 import VideoCard from "@/components/VideoCard";
 import SeriesEditModal from "@/components/SeriesEditModal";
 
@@ -31,6 +33,7 @@ export default function SeriesDetailPage() {
   const { status } = useBackend();
   const { videos, loaded, syncVideo, upsertVideo, refresh } = useVideos();
   const { addDownloadTask } = useTasks();
+  const { setMode } = useMode();
 
   const [seriesList, setSeriesList] = useState<SeriesRecord[]>([]);
   const [loadingSeries, setLoadingSeries] = useState(true);
@@ -82,6 +85,14 @@ export default function SeriesDetailPage() {
     }
     return null;
   }, [seriesList, numId, episodes]);
+
+  // A series belongs to one half of the catalog, so — like the video detail
+  // page — it is the authority on the mode: reaching it by deep link should
+  // leave the header tabs and the back link pointing at its own catalog.
+  useEffect(() => {
+    const first = episodes[0];
+    if (first?.url) setMode(getVideoCategory(first.url));
+  }, [episodes, setMode]);
 
   // Reflect series title in tab title
   useEffect(() => {

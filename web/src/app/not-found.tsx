@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 // Any unmatched path just bounces back to the catalog — silently, no toast.
+// Which half it shows is the stored mode's business, not the URL's.
 export default function NotFound() {
   const router = useRouter();
   useEffect(() => {

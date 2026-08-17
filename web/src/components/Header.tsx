@@ -8,6 +8,7 @@ import OasisLogo from "./OasisLogo";
 import AddVideoModal from "./AddVideoModal";
 import ImportExportModal from "./ImportExportModal";
 import { useVideos } from "@/context/VideoContext";
+import { useMode, type CatalogMode } from "@/context/ModeContext";
 import { useToast } from "@/components/Toast";
 import { getVideoCategory } from "@/lib/api";
 import { formatHotkey, matchesHotkey, useIsMac, useSettings } from "@/lib/settings";
@@ -198,15 +199,25 @@ export default function Header() {
   const router = useRouter();
   const pathname = usePathname();
   const { videos } = useVideos();
+  const { mode, setMode } = useMode();
   const toast = useToast();
+
+  // The tabs switch a filter, not a route — there is one catalog page. From a
+  // video, a series or settings, though, switching implies wanting to see it,
+  // so head back to the catalog (and only then, to avoid a pointless history
+  // entry when we are already there).
+  function switchMode(next: CatalogMode) {
+    setMode(next);
+    if (pathname !== "/") router.push("/");
+  }
 
   // Pick a random already-downloaded video and jump to its detail page.
   // "Downloaded" mirrors the VideoCard check: a local file that still exists.
+  // The mode comes from the store, so this still targets the right half of the
+  // catalog when pressed from a video or settings page.
   function handleRandomPick() {
-    const isAdultRoute = pathname === "/adult";
-    const targetCat = isAdultRoute ? "av" : "general";
     const categoryDownloaded = videos.filter(
-      (v) => v.video_path && v.local_file_exists && getVideoCategory(v.url) === targetCat
+      (v) => v.video_path && v.local_file_exists && getVideoCategory(v.url) === mode
     );
     const pool =
       categoryDownloaded.length > 0
@@ -274,28 +285,31 @@ export default function Header() {
                 OASIS
               </Link>
 
-              {/* Category Route Navigation Tabs */}
+              {/* Category tabs — a filter over the one catalog, so they set the
+                  stored mode rather than navigating to a route of their own. */}
               <nav className="hidden sm:flex items-center gap-1 bg-surface-elevated/80 p-1 rounded-xl border border-border-hairline text-xs font-semibold">
-                <Link
-                  href="/"
-                  className={`px-3 py-1.5 rounded-lg transition ${
-                    pathname !== "/adult"
+                <button
+                  type="button"
+                  onClick={() => switchMode("general")}
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                    mode === "general"
                       ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
                       : "text-text-tertiary hover:text-text-primary"
                   }`}
                 >
                   一般影音
-                </Link>
-                <Link
-                  href="/adult"
-                  className={`px-3 py-1.5 rounded-lg transition ${
-                    pathname === "/adult"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode("av")}
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                    mode === "av"
                       ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
                       : "text-text-tertiary hover:text-text-primary"
                   }`}
                 >
                   成人影音
-                </Link>
+                </button>
               </nav>
             </div>
 
@@ -345,28 +359,34 @@ export default function Header() {
             <div className="absolute inset-x-0 top-full border-b border-border-hairline bg-background/95 backdrop-blur-md md:hidden">
               <div className="flex flex-col gap-2 p-4">
                 <div className="flex items-center gap-1 bg-surface-elevated p-1 rounded-xl border border-border-hairline text-xs font-semibold mb-1">
-                  <Link
-                    href="/"
-                    onClick={() => setMenuOpen(false)}
-                    className={`flex-1 text-center py-2 rounded-lg transition ${
-                      pathname !== "/adult"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      switchMode("general");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex-1 text-center py-2 rounded-lg transition cursor-pointer ${
+                      mode === "general"
                         ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
                         : "text-text-tertiary hover:text-text-primary"
                     }`}
                   >
                     一般影音
-                  </Link>
-                  <Link
-                    href="/adult"
-                    onClick={() => setMenuOpen(false)}
-                    className={`flex-1 text-center py-2 rounded-lg transition ${
-                      pathname === "/adult"
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      switchMode("av");
+                      setMenuOpen(false);
+                    }}
+                    className={`flex-1 text-center py-2 rounded-lg transition cursor-pointer ${
+                      mode === "av"
                         ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
                         : "text-text-tertiary hover:text-text-primary"
                     }`}
                   >
                     成人影音
-                  </Link>
+                  </button>
                 </div>
                 <HeaderActions
                   vertical

@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/Toast";
 import { BackendProvider } from "@/context/BackendContext";
 import { VideoProvider } from "@/context/VideoContext";
 import { TasksProvider } from "@/context/TasksContext";
+import { ModeProvider } from "@/context/ModeContext";
 import Header from "@/components/Header";
 import AwakeMode from "@/components/AwakeMode";
 import OasisGate from "@/components/OasisGate";
@@ -28,18 +29,20 @@ export default function SiteChrome({ children }: { children: React.ReactNode }) 
   if (PUBLIC_ROUTES.has(pathname)) return <>{children}</>;
 
   return (
-    <BackendProvider>
-      <VideoProvider>
-        <TasksProvider>
-          <ToastProvider>
-            <Header />
-            {children}
-            <ScrollToTop />
-            <OasisGate />
-            <AwakeMode />
-          </ToastProvider>
-        </TasksProvider>
-      </VideoProvider>
-    </BackendProvider>
+    <ModeProvider>
+      <BackendProvider>
+        <VideoProvider>
+          <TasksProvider>
+            <ToastProvider>
+              <Header />
+              {children}
+              <ScrollToTop />
+              <OasisGate />
+              <AwakeMode />
+            </ToastProvider>
+          </TasksProvider>
+        </VideoProvider>
+      </BackendProvider>
+    </ModeProvider>
   );
 }

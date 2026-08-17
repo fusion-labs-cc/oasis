@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
 import { fetchSupportedSites, SupportedSite } from "@/lib/api";
 import { useBackend } from "@/context/BackendContext";
+import { useMode } from "@/context/ModeContext";
 
 // Module-level cache so the several places that render this list (main-page
 // hero, add-video modal) share a single backend request and later mounts paint
@@ -42,10 +42,13 @@ export default function SupportedSites({
   className?: string;
 }) {
   const { status } = useBackend();
-  const pathname = usePathname();
+  const { mode } = useMode();
   const [sites, setSites] = useState<SupportedSite[]>(cache ?? []);
 
-  const activeCategory = propCategory || (pathname === "/adult" ? "av" : "general");
+  // Without an explicit prop, follow the mode the user is browsing. The
+  // add-video dialog is mounted from the global header, so on a video or
+  // settings page the pathname says nothing about which half they are in.
+  const activeCategory = propCategory || mode;
 
   // Only reach the backend once it's actually connected.
   useEffect(() => {

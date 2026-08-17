@@ -7,17 +7,19 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, onlineStreamUrl, isAnime1Url, fetchSeries, getYouTubeEmbedUrl, type SeriesRecord } from "@/lib/api";
+import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, onlineStreamUrl, isAnime1Url, fetchSeries, getYouTubeEmbedUrl, getVideoCategory, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
+import { useMode } from "@/context/ModeContext";
 
 export default function VideoDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { status } = useBackend();
   const { videos, loaded, syncVideo, upsertVideo, updateVideo, removeVideo } = useVideos();
   const { addDownloadTask, markDownloadCanceled } = useTasks();
+  const { setMode } = useMode();
   const router = useRouter();
   const toast = useToast();
   const numId = Number(id);
@@ -547,6 +549,15 @@ export default function VideoDetailPage() {
   useEffect(() => {
     document.title = video?.code ? `${video.code} - OASIS` : "OASIS";
   }, [video?.code]);
+
+  // This page knows its own category, so it is the authority on the mode:
+  // arriving here by deep link, random pick or the "continue watching" hero can
+  // cross from one half of the catalog to the other, and everything downstream
+  // (the header tabs, the back links, the add-video site list) should follow the
+  // video rather than whatever was stored before.
+  useEffect(() => {
+    if (video?.url) setMode(getVideoCategory(video.url));
+  }, [video?.url, setMode]);
 
   // Drop the optimistic flag once the server view is authoritative.
   useEffect(() => {

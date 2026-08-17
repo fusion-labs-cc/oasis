@@ -7,6 +7,7 @@ import Link from "next/link";
 import { computeFacets, coverUrl, fetchSeries, deleteVideo, openInPlayer, safeExternalHref, toExportedVideo, getVideoCategory, ExportedVideo, Facets, VideoRecord, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useVideos } from "@/context/VideoContext";
+import { useMode } from "@/context/ModeContext";
 import SupportedSites from "@/components/SupportedSites";
 import ImportExportModal from "@/components/ImportExportModal";
 import SeriesAssignModal from "@/components/SeriesAssignModal";
@@ -16,7 +17,6 @@ import VideoCard from "@/components/VideoCard";
 
 type DownloadFilter = "all" | "downloaded" | "not_downloaded";
 type SortKey = "added_desc" | "added_asc" | "plays_desc" | "plays_asc";
-type CategoryFilter = "general" | "av";
 
 const SORT_KEYS: SortKey[] = ["added_desc", "added_asc", "plays_desc", "plays_asc"];
 const DOWNLOAD_FILTERS: DownloadFilter[] = ["all", "downloaded", "not_downloaded"];
@@ -33,13 +33,14 @@ function isDownloaded(v: VideoRecord): boolean {
   return Boolean(v.video_path && v.local_file_exists);
 }
 
-export function CatalogView({ category = "general" }: { category?: CategoryFilter }) {
+export function CatalogView() {
   // Full catalog lives in the shared VideoContext so it survives navigation.
   // Filtering below is all client-side.
   const { videos: allVideos, loading: loadingList, error, updateVideo, removeVideo, refresh } = useVideos();
 
-  // Filters
-  const categoryFilter = category;
+  // Filters. Which half of the catalog this is comes from the shared mode
+  // store, not from the route — see @/context/ModeContext.
+  const { mode: categoryFilter } = useMode();
   const [selectedActress, setSelectedActress] = useState<string | null>(null);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [match, setMatch] = useState<"all" | "any">("all");
@@ -98,7 +99,11 @@ export function CatalogView({ category = "general" }: { category?: CategoryFilte
       return;
     }
     const lastId = Number(lastIdStr);
-    const found = allVideos.find((v) => v.id === lastId);
+    // Scoped to the current mode: the last thing watched is often from the
+    // other half of the catalog, and this hero renders its cover full-width.
+    const found = allVideos.find(
+      (v) => v.id === lastId && getVideoCategory(v.url) === categoryFilter,
+    );
     if (found) {
       const progressStr = localStorage.getItem(`oasis:progress:${lastId}`);
       const durationStr = localStorage.getItem(`oasis:duration:${lastId}`);
@@ -114,7 +119,7 @@ export function CatalogView({ category = "general" }: { category?: CategoryFilte
     } else {
       setLastWatched(null);
     }
-  }, [allVideos]);
+  }, [allVideos, categoryFilter]);
 
   useEffect(() => {
     loadLastWatched();
