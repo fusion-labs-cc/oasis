@@ -17,8 +17,8 @@ import sys
 import asyncio
 import webbrowser
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse, Response
+from fastapi import FastAPI, HTTPException, Request, Depends, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse, JSONResponse, Response, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -487,15 +487,23 @@ async def _bg_check_analyses():
                     if not result_queue.empty():
                         res = result_queue.get()
                         if res["status"] == "success":
-                            record = res["record"]
+                            records = [r for r in (res.get("records") or []) if r]
                             item["status"] = "success"
-                            item["record"] = record
+                            item["records"] = records
+                            item["record"] = records[0] if records else None
 
-                            # Start download if requested
-                            if item["download"] and record and 'id' in record:
-                                _start_download(record['id'], item["url"])
-                                record['is_downloading'] = True
-                                item["download_started"] = True
+                            # Start downloads if requested. Each record is queued
+                            # with *its own* URL, never the analysed one: a
+                            # listing page's URL scrapes no video, and the
+                            # download worker re-navigates to read the title and
+                            # media source off the page it is given.
+                            if item["download"]:
+                                for record in records:
+                                    if 'id' not in record:
+                                        continue
+                                    _start_download(record['id'], record['url'])
+                                    record['is_downloading'] = True
+                                    item["download_started"] = True
                         else:
                             item["status"] = "error"
                             item["error"] = res["message"]
@@ -602,9 +610,17 @@ def _analyze_worker(url: str, result_queue: multiprocessing.Queue):
         _sys.path.insert(0, _root)
 
         import catalog as _cat
+        import site_config as _sc
         print(f"[PID {_os.getpid()}] Starting analysis for {url}")
-        record = _cat.process_url(url, skip_download=True)
-        result_queue.put({"status": "success", "record": record})
+
+        # A listing URL (a season's episodes, a playlist) yields many records
+        # from one page; a video URL yields exactly one. Both come back as a
+        # list so the caller has a single shape to handle.
+        if _sc.is_listing_url(url, _sc.detect_site(url)):
+            records = _cat.process_listing_url(url)
+        else:
+            records = [_cat.process_url(url, skip_download=True)]
+        result_queue.put({"status": "success", "records": records})
     except Exception as e:
         result_queue.put({"status": "error", "message": str(e)})
 
@@ -820,6 +836,7 @@ async def analyze(req: AnalyzeRequest):
         "result_queue": result_queue,
         "status": "analyzing",
         "record": None,
+        "records": [],
         "error": None,
         "download": req.download,
         "url": url,
@@ -837,8 +854,11 @@ def analyze_status(task_id: str):
         return {"status": "not_found", "message": "任務已不存在或已完成"}
 
     if item["status"] == "success":
-        rec = item.get("record") or {}
-        return {"status": "success", "id": rec.get("id")}
+        records = item.get("records") or []
+        ids = [r["id"] for r in records if r.get("id") is not None]
+        # "id" is kept alongside "ids" so an older frontend still sees a result.
+        return {"status": "success", "id": ids[0] if ids else None,
+                "ids": ids, "count": len(ids)}
     elif item["status"] == "error":
         return {"status": "error", "error": item["error"]}
     else:
@@ -1082,6 +1102,83 @@ def facets():
     return {'actresses': sort_facet(actresses), 'tags': sort_facet(tags)}
 
 
+class SeriesCreate(BaseModel):
+    name: str
+    cover: str | None = None
+
+
+class SeriesUpdate(BaseModel):
+    name: str | None = None
+    cover: str | None = None
+
+
+class SeriesAssign(BaseModel):
+    video_ids: list[int]
+
+
+@app.get('/api/series')
+def get_series():
+    """Every series with its member count, for the filter and assign controls."""
+    return {'series': catalog.list_series()}
+
+
+@app.post('/api/series')
+def post_series(body: SeriesCreate):
+    """Create a series (or return the existing one with that name)."""
+    try:
+        return catalog.create_series(body.name, body.cover)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put('/api/series/{series_id}')
+def put_series(series_id: int, body: SeriesUpdate):
+    """Update a series (name and/or cover)."""
+    sent = body.model_fields_set
+    try:
+        record = catalog.update_series(
+            series_id,
+            name=body.name if 'name' in sent else None,
+            cover=body.cover if 'cover' in sent else ...,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if record is None:
+        raise HTTPException(status_code=404, detail='系列不存在')
+
+    if record.get('cover') and not record.get('has_cover'):
+        fetched = catalog.fetch_cover_image(record['cover'])
+        if fetched:
+            data, mime = fetched
+            catalog.store_series_cover_image(series_id, data, mime)
+            record = catalog.get_series_by_id(series_id)
+
+    return record
+
+
+@app.delete('/api/series/{series_id}')
+def remove_series(series_id: int):
+    """Delete a series. Its videos are kept and become unclassified."""
+    if not catalog.delete_series(series_id):
+        raise HTTPException(status_code=404, detail='系列不存在')
+    return {'status': 'deleted'}
+
+
+@app.post('/api/series/{series_id}/videos')
+def assign_series_videos(series_id: int, body: SeriesAssign):
+    """Put videos into a series, numbering them after its current last episode.
+
+    One request for the whole selection rather than one per video: the numbering
+    reads the series' current maximum, so concurrent single calls would race for
+    the same episode number.
+    """
+    try:
+        changed = catalog.assign_videos_to_series(series_id, body.video_ids)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {'status': 'ok', 'assigned': changed}
+
+
 class TagsUpdate(BaseModel):
     tags: list[str]
 
@@ -1101,11 +1198,18 @@ class DetailsUpdate(BaseModel):
     actress: str | None = None
     url: str | None = None
     cover: str | None = None
+    series_id: int | None = None
+    episode: int | None = None
 
 
 @app.put('/api/videos/{video_id}')
 def update_details(video_id: int, body: DetailsUpdate):
-    """Update editable metadata (片號/標題/女優/原始網址/封面) for a video."""
+    """Update editable metadata (片號/標題/女優/原始網址/封面/系列) for a video."""
+    # None is a real value for series_id/episode — it is how a caller takes a
+    # video *out* of its series — so "omitted" cannot be inferred from the value.
+    # model_fields_set is what actually distinguishes the two; catalog's sentinel
+    # default (...) then means "leave alone".
+    sent = body.model_fields_set
     try:
         record = catalog.update_video_details(
             video_id,
@@ -1114,6 +1218,8 @@ def update_details(video_id: int, body: DetailsUpdate):
             actress=body.actress,
             url=body.url,
             cover=body.cover,
+            series_id=body.series_id if 'series_id' in sent else ...,
+            episode=body.episode if 'episode' in sent else ...,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1239,6 +1345,37 @@ def stream_cover(video_id: int):
         # let the browser cache aggressively instead of re-hitting the backend.
         headers={'Cache-Control': 'public, max-age=31536000, immutable'},
     )
+
+
+@app.get('/api/stream/series-cover/{series_id}')
+def stream_series_cover(series_id: int):
+    """Serve a series cover image straight from the DB (with fallback to first episode cover)."""
+    src = catalog.get_series_cover_source(series_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail='系列不存在')
+
+    data, mime = src['data'], src['mime']
+
+    if data is None and src['cover_url']:
+        referer = src.get('page_url')
+        fetched = catalog.fetch_cover_image(src['cover_url'], referer=referer)
+        if fetched:
+            data, mime = fetched
+            series_rec = catalog.get_series_by_id(series_id)
+            if series_rec and series_rec.get('cover') == src['cover_url']:
+                catalog.store_series_cover_image(series_id, data, mime)
+
+    if data:
+        return Response(
+            content=bytes(data),
+            media_type=mime or 'image/jpeg',
+            headers={'Cache-Control': 'public, max-age=31536000, immutable'},
+        )
+
+    if src['cover_url'] and src['cover_url'].lower().startswith(('http://', 'https://')):
+        return RedirectResponse(url=src['cover_url'])
+
+    raise HTTPException(status_code=404, detail='封面不存在')
 
 
 @app.get('/api/stream/{video_id}')

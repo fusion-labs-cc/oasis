@@ -74,7 +74,7 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
   const toast = useToast();
   // The progress list ("解析進度") is shared state so downloads started from
   // cards / the detail page also land here.
-  const { tasks, setTasks } = useTasks();
+  const { tasks, setTasks, applyAnalysisResult } = useTasks();
   const [mode, setMode] = useState<Mode>("auto");
   const [url, setUrl] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -180,24 +180,11 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
     setTasks((prev) => [newTask, ...prev]);
 
     try {
-      // analyzeUrl resolves to just the new video id; fetch the full record
-      // (which also merges it into the shared catalog).
-      const videoId = await analyzeUrl(targetUrl, download, taskId);
-      const record = await syncVideo(videoId);
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskId
-            ? {
-                ...t,
-                status: download ? "downloading" : "success",
-                code: record?.code,
-                title: record?.title_zh_tw || record?.title,
-                actress: record?.actress || undefined,
-                videoId,
-              }
-            : t
-        )
-      );
+      // analyzeUrl resolves to the new video ids — one for a video URL, one per
+      // episode for a listing URL. applyAnalysisResult fetches the records
+      // (merging them into the shared catalog) and settles the task list.
+      const ids = await analyzeUrl(targetUrl, download, taskId);
+      await applyAnalysisResult(taskId, ids);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       setTasks((prev) =>
@@ -596,7 +583,13 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                   {task.status === "success" && (
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold text-accent shrink-0">
-                        ✓ {task.download ? "下載完成" : "解析成功"}
+                        {/* A listing task is a summary: its episodes download as
+                            their own rows, so it never reports "下載完成". */}
+                        ✓ {task.episodeCount
+                          ? `已解析 ${task.episodeCount} 集`
+                          : task.download
+                            ? "下載完成"
+                            : "解析成功"}
                       </span>
                       <button
                         type="button"
@@ -644,9 +637,11 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                 {(task.status === "success" || task.status === "downloading") && (
                   <div className="mt-1 flex items-center justify-between gap-2 border-t border-border-hairline/50 pt-1.5">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-[10px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
-                        {task.code}
-                      </span>
+                      {task.code && (
+                        <span className="font-mono text-[10px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded shrink-0">
+                          {task.code}
+                        </span>
+                      )}
                       {task.actress && (
                         <span className="truncate text-[10px] font-semibold text-text-secondary">
                           {task.actress}
@@ -663,9 +658,13 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                           : typeof dlProgress === "number"
                             ? `📥 下載中 ${dlProgress}%`
                             : "📥 下載中"
-                        : task.download
-                          ? "📥 下載完成"
-                          : "🔍 僅分析"}
+                        : task.episodeCount
+                          ? task.download
+                            ? `📚 整季 ${task.episodeCount} 集已排入下載`
+                            : `📚 整季 ${task.episodeCount} 集`
+                          : task.download
+                            ? "📥 下載完成"
+                            : "🔍 僅分析"}
                     </span>
                   </div>
                 )}

@@ -12,7 +12,7 @@ Oasis 是一個**你自己架、自己用**的個人謎片收藏中心與下載�
 
 > **English**: Oasis is a self-hosted personal adult video (AV) collection manager & downloader. The web UI ([oasis.fusion-labs.cc](https://oasis.fusion-labs.cc)) is publicly hosted, but scraping, downloading, and your database all run on your own machine — nothing leaves your disk. Supports auto-parsing, translation, and one-click downloading from Jable, MissAV, and SupJav.
 
-> ⚠️ **內容性質**：本工具內建的站台 adapter 針對的是**成人謎片網站**（見下方〈支援的網站〉）。請確認你已達所在地區法定成年年齡，且下載、觀看該類內容合法，再使用本工具。
+> ⚠️ **內容性質**：本工具內建的站台 adapter 多數針對的是**成人謎片網站**（見下方〈支援的網站〉，其中 Anime1 為動畫網站）。若要使用成人網站的 adapter，請確認你已達所在地區法定成年年齡，且下載、觀看該類內容合法，再使用本工具。
 
 ![Oasis 個人謎片管理中心 - 影片儀表板截圖 (Oasis dashboard screenshot)](./example-images/dashboard.png)
 ![如何用網址新增並下載影片 (How to add a video by URL)](./example-images/add-video.gif)
@@ -85,6 +85,7 @@ chmod +x oasis-portal.sh
 - 🎲 **隨機挑片**：一鍵從已下載的影片中隨機跳轉到一部。
 - ☑️ **多選批次操作**：在卡片上多選，一次批次匯出或刪除多部影片。
 - 🔄 **JSON 匯入 / 匯出**：整份收藏庫或所選影片可匯出與匯入，方便備份與遷移。
+- 📚 **系列管理**：把相關影片收成一個「系列」並排好集數。整季動畫解析時會自動建立系列並編好集數；也可以在片庫沙盒選取多部影片後按「加入系列」，自己建立系列並放進去。系列內一律依集數排序，點卡片上的系列晶片就只看那一季。
 - ✍️ **手動新增**：沒有 adapter 的網站也能收藏——自己填標題、番號、演員、標籤即可，不需要自動解析。
 - 🕶️ **Awake Mode（老闆鍵偽裝）**：`⌘+X`（macOS）/ `Alt+X`（Windows 等）一鍵將整個網站偽裝成 Google 首頁，狀態跨重新整理與分頁重開持久化保留。
 - 🛠️ **一鍵啟動與環境建置**：跨平台整合啟動腳本，自動安裝依賴、建立虛擬環境並同時啟動前後端。
@@ -123,10 +124,13 @@ chmod +x oasis-portal.sh
 | [Jable](https://jable.tv) | `jable.tv` | ✅ |
 | [MissAV](https://missav.ws) | `missav.*` | ✅ |
 | [SupJav](https://supjav.com) | `supjav.*` | ✅ |
+| [Anime1](https://anime1.me) | `anime1.me` | ✅ 支援整季批次 |
 
-這三個是隨版本內建的 adapter（`backend/sites/*.json`），可以直接貼網址自動解析番號、演員、標籤、封面並下載。
+這些是隨版本內建的 adapter（`backend/sites/*.json`），可以直接貼網址自動解析番號、演員、標籤、封面並下載。
 
-**其他網站也能收藏，只是不會自動解析／下載。** 在網頁介面按「新增影片」→「手動新增」，自己填標題、番號、演員、標籤與封面圖，就能把任何網址記錄進收藏庫；要幫該網站做到跟上面三個一樣的自動解析／下載，需要自己寫一份 adapter，做法看 [DEVELOPMENT.md](./DEVELOPMENT.md#站台-adapter-設定-site-adapters)。
+**Anime1 支援整季批次**：貼上單集網址就只加那一集；貼上該部動畫的**分類頁**（例如 `anime1.me/category/<季度>/<動畫名>`），會一次把整季每一集都加進收藏庫，按「分析並下載」則全部排入下載佇列，逐集依序下載，每集可各自取消。
+
+**其他網站也能收藏，只是不會自動解析／下載。** 在網頁介面按「新增影片」→「手動新增」，自己填標題、番號、演員、標籤與封面圖，就能把任何網址記錄進收藏庫；要幫該網站做到跟上面一樣的自動解析／下載，需要自己寫一份 adapter，做法看 [DEVELOPMENT.md](./DEVELOPMENT.md#站台-adapter-設定-site-adapters)。
 
 ---
 
@@ -146,7 +150,7 @@ chmod +x oasis-portal.sh
 
 ## ⚠️ 免責聲明 (Disclaimer)
 
-本工具內建的站台 adapter（Jable、MissAV、SupJav）皆為**成人影片（A 片）網站**，僅供已達所在地區法定成年年齡、且該地區法律允許之使用者使用。除此之外，本工具是通用的個人影音管理引擎，不內建其他任何特定網站的定義；使用者自行新增的站台 adapter 由使用者自己提供與維護。
+本工具內建的站台 adapter 中，Jable、MissAV、SupJav 為**成人影片（A 片）網站**，其相關功能僅供已達所在地區法定成年年齡、且該地區法律允許之使用者使用；Anime1 為動畫網站。除此之外，本工具是通用的個人影音管理引擎，不內建其他任何特定網站的定義；使用者自行新增的站台 adapter 由使用者自己提供與維護。
 
 使用者須自負其設定與使用行為，並遵守目標網站的服務條款與當地法律。
 

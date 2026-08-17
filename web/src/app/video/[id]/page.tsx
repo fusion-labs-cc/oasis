@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl } from "@/lib/api";
+import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, fetchSeries, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
@@ -31,8 +31,11 @@ export default function VideoDetailPage() {
   const [newTag, setNewTag] = useState("");
   const [savingTags, setSavingTags] = useState(false);
   const [editingDetails, setEditingDetails] = useState(false);
-  const [detailsDraft, setDetailsDraft] = useState({ code: "", title: "", actress: "", url: "", cover: "" });
+  const [detailsDraft, setDetailsDraft] = useState({ code: "", title: "", actress: "", url: "", cover: "", seriesId: "", episode: "" });
   const [savingDetails, setSavingDetails] = useState(false);
+  // Loaded only when the edit form opens — the read view renders the series name
+  // straight off the record.
+  const [seriesOptions, setSeriesOptions] = useState<SeriesRecord[]>([]);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [theater, setTheater] = useState(false);
@@ -76,13 +79,22 @@ export default function VideoDetailPage() {
       actress: video.actress || "",
       url: video.url || "",
       cover: video.cover || "",
+      seriesId: video.series_id != null ? String(video.series_id) : "",
+      episode: video.episode != null ? String(video.episode) : "",
     });
+    // Fetch the pickable series only now, and don't block the form on it:
+    // failing to load them just leaves the dropdown at its current value.
+    fetchSeries()
+      .then(setSeriesOptions)
+      .catch(() => setSeriesOptions([]));
     setEditingDetails(true);
   }
 
   async function saveDetails() {
     if (!video?.id) return;
     setSavingDetails(true);
+    const seriesId = detailsDraft.seriesId ? Number(detailsDraft.seriesId) : null;
+    const episode = detailsDraft.episode.trim();
     try {
       const updated = await updateVideoDetails(video.id, {
         code: detailsDraft.code.trim(),
@@ -90,6 +102,10 @@ export default function VideoDetailPage() {
         actress: detailsDraft.actress.trim(),
         url: detailsDraft.url.trim(),
         cover: detailsDraft.cover.trim(),
+        series_id: seriesId,
+        // Sent explicitly as null when blank so clearing the box clears the
+        // number, rather than the backend reading it as "unchanged".
+        episode: seriesId != null && episode ? Number(episode) : null,
       });
       upsertVideo(updated);
       setEditingDetails(false);
@@ -703,6 +719,34 @@ export default function VideoDetailPage() {
                   className="w-full rounded-xl border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary font-sans focus:outline-none focus:border-accent transition"
                 />
               </label>
+              <label className="block">
+                <span className="block text-[10px] font-bold text-text-tertiary font-sans uppercase mb-1.5">系列</span>
+                <select
+                  value={detailsDraft.seriesId}
+                  onChange={(e) => setDetailsDraft((d) => ({ ...d, seriesId: e.target.value }))}
+                  disabled={savingDetails}
+                  className="w-full rounded-xl border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary font-sans focus:outline-none focus:border-accent transition cursor-pointer"
+                >
+                  <option value="">未分類</option>
+                  {seriesOptions.map((s) => (
+                    <option key={s.id} value={String(s.id)}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="block text-[10px] font-bold text-text-tertiary font-sans uppercase mb-1.5">集數</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={detailsDraft.episode}
+                  onChange={(e) => setDetailsDraft((d) => ({ ...d, episode: e.target.value }))}
+                  disabled={savingDetails || !detailsDraft.seriesId}
+                  placeholder={detailsDraft.seriesId ? "第幾集" : "先選擇系列"}
+                  className="w-full rounded-xl border border-border-hairline bg-surface-highest px-3 py-2 text-sm text-text-primary font-mono focus:outline-none focus:border-accent transition disabled:opacity-50"
+                />
+              </label>
               <label className="block sm:col-span-2">
                 <span className="block text-[10px] font-bold text-text-tertiary font-sans uppercase mb-1.5">標題</span>
                 <input
@@ -752,18 +796,33 @@ export default function VideoDetailPage() {
               編輯
             </button>
           </h1>
-          <div className="flex items-center gap-2">
-            {video.actress ? (
+          <div className="flex items-center gap-2 text-xs font-semibold text-text-secondary">
+            {video.actress && (
               <Link
                 href={`/?actress=${encodeURIComponent(video.actress)}`}
-                className="rounded-full bg-accent/10 border border-accent/20 px-3.5 py-1.5 text-xs font-bold text-accent hover:bg-accent/20 transition duration-150"
+                className="hover:text-accent transition font-bold text-accent"
               >
                 {video.actress}
               </Link>
-            ) : (
-              <span className="text-xs text-text-tertiary font-sans bg-surface-highest/40 border border-dashed border-border-hairline rounded-full px-3 py-1">
-                無指定女優
-              </span>
+            )}
+            {video.actress && video.series && (
+              <span className="text-text-tertiary font-normal">/</span>
+            )}
+            {video.series && (
+              video.series_id != null ? (
+                <Link
+                  href={`/series/${video.series_id}`}
+                  title={`查看系列「${video.series}」`}
+                  className="hover:text-accent transition"
+                >
+                  {video.series}
+                </Link>
+              ) : (
+                <span>{video.series}</span>
+              )
+            )}
+            {!video.actress && !video.series && (
+              <span className="text-text-tertiary font-sans">無指定女優 / 系列</span>
             )}
           </div>
         </div>

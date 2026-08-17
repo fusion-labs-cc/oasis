@@ -216,10 +216,16 @@ def get_connection() -> sqlite3.Connection:
 # `has_cover` exposes only *whether* an image is cached; the bytes are served
 # separately by /api/stream/cover.
 _VIDEO_COLUMNS = (
-    "id, code, url, title, title_zh_tw, actress, tags, cover, video_path, "
-    "created_at, play_count, download_pending, "
-    "(cover_image IS NOT NULL) AS has_cover"
+    "v.id, v.code, v.url, v.title, v.title_zh_tw, v.actress, v.tags, v.cover, v.video_path, "
+    "v.created_at, v.play_count, v.download_pending, v.series_id, v.episode, "
+    "s.name AS series, s.cover AS series_cover, (s.cover_image IS NOT NULL) AS series_has_cover, "
+    "(v.cover_image IS NOT NULL) AS has_cover"
 )
+
+# Every read joins the series name in rather than returning only series_id: the
+# catalog UI shows the name on each card, and a bare id would force the frontend
+# to load and hold a second list just to render one chip.
+_VIDEO_SELECT = f"SELECT {_VIDEO_COLUMNS} FROM videos v LEFT JOIN series s ON s.id = v.series_id"
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -227,6 +233,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     d['tags'] = json.loads(d['tags'] or '[]')
     if 'has_cover' in d:
         d['has_cover'] = bool(d['has_cover'])
+    if 'series_has_cover' in d:
+        d['series_has_cover'] = bool(d['series_has_cover'])
     return d
 
 
@@ -235,8 +243,10 @@ def insert_video(record: dict):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO videos (code, url, title, title_zh_tw, actress, tags, cover, video_path)
-        VALUES (:code, :url, :title, :title_zh_tw, :actress, :tags, :cover, :video_path)
+        INSERT INTO videos (code, url, title, title_zh_tw, actress, tags, cover, video_path,
+                            series_id, episode)
+        VALUES (:code, :url, :title, :title_zh_tw, :actress, :tags, :cover, :video_path,
+                :series_id, :episode)
         ON CONFLICT(code) DO UPDATE SET
             url         = excluded.url,
             title       = excluded.title,
@@ -244,9 +254,23 @@ def insert_video(record: dict):
             actress     = excluded.actress,
             tags        = excluded.tags,
             cover       = excluded.cover,
-            video_path  = COALESCE(excluded.video_path, videos.video_path)
-    """, {**record, 'tags': json.dumps(record.get('tags') or []), 'video_path': record.get('video_path')})
-    vid = cur.lastrowid
+            video_path  = COALESCE(excluded.video_path, videos.video_path),
+            -- COALESCE like video_path: a re-analysed season restates its series
+            -- and updates it, while any other write leaves a hand-set series alone.
+            series_id   = COALESCE(excluded.series_id, videos.series_id),
+            episode     = COALESCE(excluded.episode, videos.episode)
+    """, {
+        **record,
+        'tags': json.dumps(record.get('tags') or []),
+        'video_path': record.get('video_path'),
+        'series_id': record.get('series_id'),
+        'episode': record.get('episode'),
+    })
+    # lastrowid is only meaningful on the INSERT branch; when the ON CONFLICT
+    # UPDATE fires it still holds whatever the previous statement set, so read
+    # the id back by the key we upserted on.
+    row = cur.execute("SELECT id FROM videos WHERE code = ?", (record['code'],)).fetchone()
+    vid = row['id'] if row else cur.lastrowid
     conn.commit()
     conn.close()
     return vid
@@ -256,7 +280,7 @@ def list_all_videos():
     """List all videos in the catalog."""
     conn = get_connection()
     rows = [_row_to_dict(r) for r in conn.execute(
-        f"SELECT {_VIDEO_COLUMNS} FROM videos ORDER BY created_at DESC"
+        f"{_VIDEO_SELECT} ORDER BY v.created_at DESC, v.id DESC"
     )]
     conn.close()
     return rows
@@ -265,7 +289,7 @@ def list_all_videos():
 def search_by_code(code: str):
     conn = get_connection()
     rows = [_row_to_dict(r) for r in conn.execute(
-        f"SELECT {_VIDEO_COLUMNS} FROM videos WHERE code = ?", (code.upper(),)
+        f"{_VIDEO_SELECT} WHERE v.code = ?", (code.upper(),)
     )]
     conn.close()
     return rows
@@ -273,7 +297,7 @@ def search_by_code(code: str):
 
 def get_video_by_id(video_id: int):
     conn = get_connection()
-    row = conn.execute(f"SELECT {_VIDEO_COLUMNS} FROM videos WHERE id = ?", (video_id,)).fetchone()
+    row = conn.execute(f"{_VIDEO_SELECT} WHERE v.id = ?", (video_id,)).fetchone()
     conn.close()
     if row:
         return _row_to_dict(row)
@@ -355,12 +379,17 @@ def update_video_tags(video_id: int, tags: list):
     return get_video_by_id(video_id)
 
 
-def update_video_details(video_id: int, code=None, title=None, actress=None, url=None, cover=None):
-    """Update editable metadata (片號/標題/女優/原始網址/封面) for a video.
+def update_video_details(video_id: int, code=None, title=None, actress=None, url=None,
+                         cover=None, series_id=..., episode=...):
+    """Update editable metadata (片號/標題/女優/原始網址/封面/系列) for a video.
 
     Every argument is optional; only the fields that are not ``None`` are
     written. Returns the updated record, or None if the video does not exist.
     Raises ValueError on an empty required field or a duplicate code.
+
+    ``series_id`` and ``episode`` default to a sentinel rather than None because
+    None is a meaningful value for them — it is how the caller clears a video's
+    series — so "not supplied" and "set to nothing" have to stay distinguishable.
     """
     row = get_video_by_id(video_id)
     if row is None:
@@ -406,6 +435,19 @@ def update_video_details(video_id: int, code=None, title=None, actress=None, url
             updates['cover_image'] = None
             updates['cover_type'] = None
 
+    if series_id is not ...:
+        sid = int(series_id) if series_id not in (None, '') else None
+        if sid is not None and get_series_by_id(sid) is None:
+            raise ValueError('系列不存在')
+        updates['series_id'] = sid
+        # Leaving a series must not strand an episode number behind: it would
+        # keep sorting the video as if it were still part of one.
+        if sid is None:
+            updates['episode'] = None
+
+    if episode is not ... and updates.get('series_id', row.get('series_id')) is not None:
+        updates['episode'] = int(episode) if episode not in (None, '') else None
+
     if not updates:
         return row
 
@@ -420,6 +462,166 @@ def update_video_details(video_id: int, code=None, title=None, actress=None, url
         raise ValueError(f'片號 {code} 已存在，請改用其他片號')
     conn.close()
     return get_video_by_id(video_id)
+
+
+# -- Series -------------------------------------------------------------------
+
+def list_series() -> list:
+    """Every series with its member count, cover, and has_cover."""
+    conn = get_connection()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT s.id, s.name, s.cover, (s.cover_image IS NOT NULL) AS has_cover, s.created_at, COUNT(v.id) AS count "
+        "FROM series s LEFT JOIN videos v ON v.series_id = s.id "
+        "GROUP BY s.id ORDER BY count DESC, s.name"
+    )]
+    conn.close()
+    return rows
+
+
+def get_series_by_id(series_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id, name, cover, (cover_image IS NOT NULL) AS has_cover, created_at FROM series WHERE id = ?",
+        (series_id,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_series(name: str, cover: str | None = None) -> dict:
+    """Create a series, or return the existing one with that name.
+
+    Idempotent on purpose: re-analysing a season must rejoin its series rather
+    than grow a second one with an identical name.
+    """
+    name = (name or '').strip()
+    if not name:
+        raise ValueError('系列名稱不可為空')
+    cover_val = cover.strip() if isinstance(cover, str) and cover.strip() else None
+    conn = get_connection()
+    conn.execute("INSERT OR IGNORE INTO series (name, cover) VALUES (?, ?)", (name, cover_val))
+    conn.commit()
+    row = conn.execute(
+        "SELECT id, name, cover, (cover_image IS NOT NULL) AS has_cover, created_at FROM series WHERE name = ?",
+        (name,)
+    ).fetchone()
+    conn.close()
+    return dict(row)
+
+
+def update_series(series_id: int, name: str | None = None, cover: str | None = ...) -> dict | None:
+    """Update editable series fields (name and/or cover)."""
+    if get_series_by_id(series_id) is None:
+        return None
+
+    conn = get_connection()
+    updates = []
+    params = []
+
+    if name is not None:
+        clean_name = name.strip()
+        if not clean_name:
+            conn.close()
+            raise ValueError('系列名稱不可為空')
+        updates.append("name = ?")
+        params.append(clean_name)
+
+    if cover is not ...:
+        clean_cover = cover.strip() if isinstance(cover, str) and cover.strip() else None
+
+        # If clean_cover is a local video cover URL, extract video_id and copy its cover image directly
+        m = re.search(r'/api/stream/cover/(\d+)', clean_cover or '')
+        if m:
+            v_id = int(m.group(1))
+            v_row = conn.execute("SELECT cover, cover_image, cover_type FROM videos WHERE id = ?", (v_id,)).fetchone()
+            if v_row:
+                clean_cover = v_row['cover'] or clean_cover
+                if v_row['cover_image']:
+                    conn.execute(
+                        "UPDATE series SET cover = ?, cover_image = ?, cover_type = ? WHERE id = ?",
+                        (clean_cover, v_row['cover_image'], v_row['cover_type'], series_id)
+                    )
+                    if name is not None:
+                        conn.execute("UPDATE series SET name = ? WHERE id = ?", (name.strip(), series_id))
+                    conn.commit()
+                    conn.close()
+                    return get_series_by_id(series_id)
+
+        updates.append("cover = ?")
+        params.append(clean_cover)
+        updates.append("cover_image = NULL")
+        updates.append("cover_type = NULL")
+
+    if updates:
+        params.append(series_id)
+        sql = f"UPDATE series SET {', '.join(updates)} WHERE id = ?"
+        try:
+            conn.execute(sql, params)
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.close()
+            raise ValueError(f'系列「{name}」已存在')
+
+    conn.close()
+    return get_series_by_id(series_id)
+
+
+def rename_series(series_id: int, name: str):
+    return update_series(series_id, name=name)
+
+
+def delete_series(series_id: int) -> bool:
+    """Delete a series. Its videos are kept — they just become unclassified."""
+    if get_series_by_id(series_id) is None:
+        return False
+    conn = get_connection()
+    # One transaction: a series row that vanished while its members still
+    # pointed at it would leave every one of them with a dangling series_id,
+    # and nothing in SQLite is enforcing that reference for us.
+    conn.execute("UPDATE videos SET series_id = NULL, episode = NULL WHERE series_id = ?", (series_id,))
+    conn.execute("DELETE FROM series WHERE id = ?", (series_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def assign_videos_to_series(series_id: int, video_ids: list) -> int:
+    """Put videos into a series, numbering them after its current last episode.
+
+    Numbering continues rather than restarting so a second batch appends
+    instead of colliding with the first. Videos already in this series keep
+    their episode number; moving one in from elsewhere gives it a new one.
+    Returns how many rows changed.
+    """
+    if get_series_by_id(series_id) is None:
+        raise ValueError('系列不存在')
+    if not video_ids:
+        return 0
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT MAX(episode) AS m FROM videos WHERE series_id = ?", (series_id,)
+    ).fetchone()
+    next_ep = (row['m'] or 0) + 1
+
+    changed = 0
+    for vid in video_ids:
+        current = conn.execute(
+            "SELECT series_id, episode FROM videos WHERE id = ?", (vid,)
+        ).fetchone()
+        if current is None:
+            continue
+        if current['series_id'] == series_id and current['episode'] is not None:
+            continue  # already placed — don't renumber it
+        conn.execute(
+            "UPDATE videos SET series_id = ?, episode = ? WHERE id = ?",
+            (series_id, next_ep, vid),
+        )
+        next_ep += 1
+        changed += 1
+    conn.commit()
+    conn.close()
+    return changed
 
 
 def increment_play_count(video_id: int):
@@ -448,16 +650,25 @@ _COVER_MAX_BYTES = 15 * 1024 * 1024
 
 
 def fetch_cover_image(url: str, referer: str | None = None) -> tuple[bytes, str] | None:
-    """Download a cover image's raw bytes + MIME type from its origin URL.
-
-    Best-effort: returns None on any failure, a non-image response, or an
-    oversized body, so a dead or hotlink-protected origin simply leaves the
-    cover uncached rather than raising. `referer` is the video's page URL —
-    some sites hotlink-protect covers and reject a request without it.
-    """
+    """Download a cover image's raw bytes + MIME type from its origin URL."""
     url = (url or '').strip()
+
+    # If URL is a local video stream endpoint, fetch bytes directly from DB
+    m = re.search(r'/api/stream/cover/(\d+)', url)
+    if m:
+        v_src = get_cover_source(int(m.group(1)))
+        if v_src and v_src['data']:
+            return bytes(v_src['data']), v_src['mime'] or 'image/jpeg'
+        if v_src and v_src['cover_url'] and not ('127.0.0.1' in v_src['cover_url'] or 'localhost' in v_src['cover_url']):
+            url = v_src['cover_url']
+
     if not url.lower().startswith(('http://', 'https://')):
         return None
+
+    # Refuse loopback HTTP requests to backend itself to prevent deadlock
+    if '127.0.0.1' in url or 'localhost' in url:
+        return None
+
     try:
         import requests
         headers = {
@@ -497,22 +708,100 @@ def store_cover_image(video_id: int, data: bytes, mime: str):
 
 def get_cover_source(video_id: int) -> dict | None:
     """Return everything the cover endpoint needs to serve (or lazily fetch) a
-    cover: the cached bytes/MIME if present, plus the origin cover URL and the
-    page URL (used as the Referer when fetching). None if the video is gone."""
+    cover. If video has no cover of its own, falls back to its series cover if present."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT cover_image, cover_type, cover, url FROM videos WHERE id = ?",
+        "SELECT v.cover_image, v.cover_type, v.cover, v.url, v.series_id, "
+        "s.cover AS s_cover, s.cover_image AS s_cover_image, s.cover_type AS s_cover_type "
+        "FROM videos v LEFT JOIN series s ON s.id = v.series_id WHERE v.id = ?",
         (video_id,),
     ).fetchone()
     conn.close()
     if row is None:
         return None
+
+    # If video has its own cover image or URL
+    if row['cover_image'] or (row['cover'] and row['cover'].strip()):
+        return {
+            'data': row['cover_image'],
+            'mime': row['cover_type'],
+            'cover_url': row['cover'],
+            'page_url': row['url'],
+        }
+
+    # Fallback to series cover if video has no cover of its own
+    if row['series_id'] and (row['s_cover_image'] or (row['s_cover'] and row['s_cover'].strip())):
+        return {
+            'data': row['s_cover_image'],
+            'mime': row['s_cover_type'],
+            'cover_url': row['s_cover'],
+            'page_url': row['url'],
+        }
+
     return {
+        'data': None,
+        'mime': None,
+        'cover_url': None,
+        'page_url': row['url'],
+    }
+
+
+def store_series_cover_image(series_id: int, data: bytes, mime: str):
+    """Persist the fetched cover bytes + MIME for a series."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE series SET cover_image = ?, cover_type = ? WHERE id = ?",
+        (sqlite3.Binary(data), mime, series_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_series_cover_source(series_id: int) -> dict | None:
+    """Return cover image bytes/MIME and URL for a series, falling back to first episode cover if no series cover set."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT cover_image, cover_type, cover FROM series WHERE id = ?",
+        (series_id,),
+    ).fetchone()
+    if row is None:
+        conn.close()
+        return None
+
+    result = {
         'data': row['cover_image'],
         'mime': row['cover_type'],
         'cover_url': row['cover'],
-        'page_url': row['url'],
     }
+
+    # If series has cover_url but no cached bytes, check if any video in this series shares this cover URL and has cached bytes!
+    if not result['data'] and result['cover_url']:
+        ep_row = conn.execute(
+            "SELECT cover_image, cover_type, url FROM videos "
+            "WHERE series_id = ? AND cover = ? AND cover_image IS NOT NULL LIMIT 1",
+            (series_id, result['cover_url'])
+        ).fetchone()
+        if ep_row:
+            result['data'] = ep_row['cover_image']
+            result['mime'] = ep_row['cover_type']
+            result['page_url'] = ep_row['url']
+
+    if not result['data'] and not result['cover_url']:
+        ep_row = conn.execute(
+            "SELECT cover_image, cover_type, cover, url FROM videos "
+            "WHERE series_id = ? AND (cover_image IS NOT NULL OR (cover IS NOT NULL AND cover != '')) "
+            "ORDER BY episode ASC, id ASC LIMIT 1",
+            (series_id,)
+        ).fetchone()
+        if ep_row:
+            result = {
+                'data': ep_row['cover_image'],
+                'mime': ep_row['cover_type'],
+                'cover_url': ep_row['cover'],
+                'page_url': ep_row['url'],
+            }
+    conn.close()
+    return result
 
 
 def get_covers_needing_backfill() -> list[tuple[int, str, str]]:
@@ -536,17 +825,11 @@ def get_covers_needing_backfill() -> list[tuple[int, str, str]]:
 
 _active_driver = None
 
-def fetch_page_metadata(url: str) -> tuple:
-    """
-    Fetch the video title and tags from the page without downloading the video.
-    Returns (title, raw_tags) where raw_tags is a list of tag strings from the DOM.
-    """
-    global _active_driver
+def _start_scrape_driver(adapter: dict):
+    """The headless Chrome the scraping paths share."""
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
-    from site_config import detect_site, get_cover_url, get_video_actress, get_video_name, get_video_tags, setup_driver_for_site, wait_for_page_load
-
-    adapter = detect_site(url)
+    from site_config import setup_driver_for_site
 
     options = Options()
     options.add_argument('--no-sandbox')
@@ -557,9 +840,20 @@ def fetch_page_metadata(url: str) -> tuple:
         'user-agent=Mozilla/5.0 (Windows NT 6.1; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/84.0.4147.125 Safari/537.36'
     )
-    options = setup_driver_for_site(options, adapter)
+    return webdriver.Chrome(options=setup_driver_for_site(options, adapter))
 
-    dr = webdriver.Chrome(options=options)
+
+def fetch_page_metadata(url: str) -> tuple:
+    """
+    Fetch the video title and tags from the page without downloading the video.
+    Returns (title, raw_tags) where raw_tags is a list of tag strings from the DOM.
+    """
+    global _active_driver
+    from site_config import detect_site, get_cover_url, get_video_actress, get_video_name, get_video_tags, wait_for_page_load
+
+    adapter = detect_site(url)
+
+    dr = _start_scrape_driver(adapter)
     _active_driver = dr
     try:
         dr.get(url)
@@ -676,6 +970,131 @@ def process_url(url: str, skip_download: bool = False):
     return record
 
 
+def _fetch_listing_entries(url: str) -> tuple[dict, list[dict], str | None]:
+    """Walk a listing and its following pages in one browser session, returning
+    (adapter, entries, series_name) with entries in page order."""
+    global _active_driver
+    from site_config import (
+        detect_site, get_listing_entries, get_listing_series_name,
+        get_next_page_url, listing_max_pages, wait_for_page_load,
+    )
+
+    adapter = detect_site(url)
+    max_pages = listing_max_pages(adapter)
+
+    dr = _start_scrape_driver(adapter)
+    _active_driver = dr
+    entries: list[dict] = []
+    seen: set[str] = set()
+    series_name: str | None = None
+    try:
+        page_url = url
+        visited: set[str] = set()
+        for page in range(max_pages):
+            visited.add(page_url)
+            dr.get(page_url)
+            wait_for_page_load(dr, adapter)
+            # Read from the first page only: later pages are the same listing,
+            # and page 1 is the one the user actually pasted.
+            if page == 0:
+                series_name = get_listing_series_name(dr, adapter)
+            found = get_listing_entries(dr, adapter)
+            print(f'   第 {page + 1} 頁: {len(found)} 個項目')
+            for entry in found:
+                if entry['url'] in seen:
+                    continue
+                seen.add(entry['url'])
+                entries.append(entry)
+
+            next_url = get_next_page_url(dr, adapter)
+            # A last page whose pager links back to a page already read would
+            # otherwise loop until max_pages, re-reading the same items.
+            if not next_url or next_url in visited:
+                break
+            page_url = next_url
+        else:
+            print(f'⚠️  已達分頁上限 {max_pages} 頁，停止列舉')
+    finally:
+        dr.quit()
+        _active_driver = None
+    return adapter, entries, series_name
+
+
+def process_listing_url(url: str) -> list[dict]:
+    """Process a listing page (a season's episodes, a playlist) into one catalog
+    record per item. Returns the records, oldest first.
+
+    The individual item pages are never opened: the listing already carries every
+    title, and a site that lists this way has no per-item cover or cast to go
+    back for — so a 12-episode season costs one page load, not thirteen. The
+    media URL is resolved later, by the download worker, on the item's own page.
+    """
+    from site_config import derive_code
+
+    print(f'\n{"=" * 60}')
+    print(f'📚 處理列表頁: {url}')
+    print(f'{"=" * 60}')
+
+    print('\n📡 正在列舉項目...')
+    adapter, entries, series_name = _fetch_listing_entries(url)
+    if not entries:
+        raise ValueError('此頁面沒有找到任何影片，請確認網址是否為列表頁')
+    print(f'   共 {len(entries)} 個項目')
+
+    # Group the whole listing under a series so episode order survives. Failing
+    # to create it is not worth losing the episodes over — they just land
+    # unclassified, and the user can group them by hand.
+    series_id = None
+    if series_name:
+        try:
+            series_id = create_series(series_name)['id']
+            print(f'   系列: {series_name}')
+        except Exception as e:
+            print(f'⚠️  建立系列失敗（{series_name}）: {e}')
+
+    records = []
+    # Listings run newest-first; insert oldest-first so ascending ids and
+    # episode numbers both match the real episode order.
+    for episode_no, entry in enumerate(reversed(entries), start=1):
+        full_title = (entry.get('title') or '').strip()
+        if not full_title:
+            print(f'⚠️  略過沒有標題的項目: {entry["url"]}')
+            continue
+
+        # A derived code is what keeps a season's episodes apart: the studio-code
+        # heuristic never matches these titles, and its 20-character fallback is
+        # identical across every episode of a long-named series.
+        code = derive_code(entry['url'], adapter, full_title) \
+            or extract_code(full_title) or full_title[:20]
+        tags = translate_tags_to_zh_tw(extract_tags(entry.get('tags') or [], None))
+        title_zh_tw = full_title if is_zh_tw(full_title) else translate_to_zh_tw(full_title)
+
+        record = {
+            'code': code,
+            'url': entry['url'],
+            'title': full_title,
+            'title_zh_tw': title_zh_tw,
+            'actress': None,
+            'tags': tags,
+            'cover': None,
+            'video_path': find_local_file(code, full_title),
+            'series_id': series_id,
+            'episode': episode_no if series_id else None,
+        }
+        try:
+            record['id'] = insert_video(record)
+        except Exception as e:
+            print(f'❌ 寫入失敗 ({code}): {e}')
+            continue
+        print(f'   ✅ {code}  {full_title}')
+        records.append(record)
+
+    if not records:
+        raise ValueError('列表頁的項目都無法解析')
+    print(f'\n💾 已寫入 {len(records)} 筆記錄')
+    return records
+
+
 def next_manual_code() -> str:
     """Next sequential placeholder code for manual entries without a real code.
 
@@ -771,7 +1190,10 @@ def create_manual_video(url, title, code=None, actress=None, tags=None, cover=No
 # Portable metadata fields carried in an export. Deliberately excludes the local
 # video_path, play_count, download_pending and created_at — those are specific to
 # one machine/session and are re-derived (or reset) on the importing side.
-EXPORT_FIELDS = ('code', 'url', 'title', 'title_zh_tw', 'actress', 'tags', 'cover')
+# Series travels as its *name*, not its id: ids are local to one database, and a
+# round-trip through another one would otherwise silently drop the grouping.
+EXPORT_FIELDS = ('code', 'url', 'title', 'title_zh_tw', 'actress', 'tags', 'cover',
+                 'series', 'episode')
 
 
 def export_videos() -> list[dict]:
@@ -819,6 +1241,16 @@ def import_videos(records: list) -> dict:
                 seen.add(t)
                 tags.append(t)
 
+        # Re-create the series by name in this database; its id there is
+        # meaningless here. create_series is idempotent, so a whole exported
+        # season lands in one series.
+        series_name = (rec.get('series') or '').strip()
+        series_id = create_series(series_name)['id'] if series_name else None
+        try:
+            episode = int(rec['episode']) if rec.get('episode') not in (None, '') else None
+        except (TypeError, ValueError):
+            episode = None
+
         insert_video({
             'code': code,
             'url': url,
@@ -828,6 +1260,8 @@ def import_videos(records: list) -> dict:
             'tags': tags,
             'cover': (rec.get('cover') or '').strip() or None,
             'video_path': None,  # preserved on existing rows via COALESCE upsert
+            'series_id': series_id,
+            'episode': episode if series_id else None,
         })
         imported += 1
 

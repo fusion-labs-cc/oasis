@@ -10,7 +10,7 @@ import json
 import os
 import re
 import time
-from urllib.parse import urlparse, urljoin
+from urllib.parse import unquote, urlparse, urljoin
 
 # Where user-supplied adapters live. Kept out of version control so the shipped
 # tool carries no built-in site definitions.
@@ -162,6 +162,123 @@ def get_cover_url(driver, adapter: dict | None = None) -> str | None:
     return None
 
 
+def derive_code(url: str, adapter: dict, title: str = '') -> str | None:
+    """Build the catalog's unique code from the URL (or title) per the adapter.
+
+    catalog.py's own heuristic looks for a studio code (AAA-123) and otherwise
+    falls back to the title's first 20 characters. That fallback collides across
+    episodes of one series — every episode of a long-named show shares its
+    opening 20 characters, and videos.code is UNIQUE, so a season's episodes
+    would upsert over each other. Sites whose URLs carry a stable per-item id
+    say so here instead of losing episodes to that collision.
+    """
+    cfg = adapter.get('code') or {}
+    pattern = cfg.get('pattern')
+    if not pattern:
+        return None
+    source = title if cfg.get('from') == 'title' else url
+    m = re.search(pattern, source or '')
+    if not m:
+        return None
+    out = cfg.get('template') or '{1}'
+    for i, group in enumerate(m.groups(), start=1):
+        out = out.replace('{%d}' % i, group or '')
+    return out.strip() or None
+
+
+def is_listing_url(url: str, adapter: dict) -> bool:
+    """Does this URL point at a listing of many videos rather than a single one?
+
+    The adapter names the URL shapes that list (a season's episodes, a playlist)
+    because the engine cannot tell from the DOM: a listing and a single video are
+    served by the same host and usually the same page template.
+    """
+    cfg = adapter.get('listing') or {}
+    return any(re.search(p, url) for p in cfg.get('url_patterns', []))
+
+
+def listing_max_pages(adapter: dict) -> int:
+    """How many listing pages to follow at most. A hard stop, not a preference:
+    the same URL shape that lists one show's episodes usually also lists a whole
+    season's worth of shows, and a mistyped URL must not enumerate thousands."""
+    return max(1, int((adapter.get('listing') or {}).get('max_pages') or 1))
+
+
+def get_listing_entries(driver, adapter: dict) -> list[dict]:
+    """Enumerate the listing page the driver is on: one dict per item, in page
+    order. Returns [{url, title, tags}]."""
+    cfg = adapter.get('listing') or {}
+    item_selector = cfg.get('item_selector')
+    if not item_selector:
+        return []
+    link_cfg = cfg.get('link') or {}
+    title_css = (cfg.get('title') or {}).get('css')
+
+    entries: list[dict] = []
+    for item in driver.find_elements('css selector', item_selector):
+        try:
+            href = item.find_element(
+                'css selector', link_cfg.get('css', 'a')
+            ).get_attribute(link_cfg.get('attr', 'href'))
+        except Exception:
+            continue
+        if not href or not href.strip():
+            continue
+
+        title = ''
+        if title_css:
+            try:
+                title = item.find_element('css selector', title_css).text.strip()
+            except Exception:
+                title = ''
+
+        tags: list[str] = []
+        for selector in cfg.get('tag_selectors', []):
+            try:
+                for el in item.find_elements('css selector', selector):
+                    t = el.text.strip()
+                    if t and t not in tags:
+                        tags.append(t)
+            except Exception:
+                continue
+
+        entries.append({
+            'url': _absolutize(driver, href.strip()),
+            'title': title,
+            'tags': tags,
+        })
+    return entries
+
+
+def get_listing_series_name(driver, adapter: dict) -> str | None:
+    """The name the listing gives itself — used to group its items into a series."""
+    cfg = (adapter.get('listing') or {}).get('series_name') or {}
+    css = cfg.get('css')
+    if not css:
+        return None
+    try:
+        el = driver.find_element('css selector', css)
+        text = (el.get_attribute(cfg['attr']) if cfg.get('attr') else el.text) or ''
+    except Exception:
+        return None
+    return text.strip() or None
+
+
+def get_next_page_url(driver, adapter: dict) -> str | None:
+    """The listing's link to its next page, or None when this is the last one."""
+    cfg = (adapter.get('listing') or {}).get('next_page') or {}
+    css = cfg.get('css')
+    if not css:
+        return None
+    try:
+        value = driver.find_element('css selector', css).get_attribute(
+            cfg.get('attr', 'href')
+        )
+    except Exception:
+        return None
+    return _absolutize(driver, value.strip()) if value and value.strip() else None
+
+
 def _match_first(regexes, text):
     for pattern in regexes:
         m = re.search(pattern, text)
@@ -297,6 +414,91 @@ def get_request_headers(adapter: dict, video_page_url: str = ''):
     for key, value in (adapter.get('headers') or {}).items():
         headers[key] = value.replace('{page_url}', video_page_url)
     return headers
+
+
+def media_mode(adapter: dict) -> str:
+    """Which download pipeline the site needs: 'hls' (an m3u8 playlist fetched as
+    TS segments, the default) or 'http' (one progressive file, downloaded whole)."""
+    return ((adapter.get('media') or {}).get('mode') or 'hls').lower()
+
+
+def _json_path(data, path: str):
+    """Walk a dotted path through decoded JSON; a numeric step indexes a list."""
+    cur = data
+    for step in path.split('.'):
+        if not step:
+            continue
+        try:
+            cur = cur[int(step)] if step.isdigit() else cur[step]
+        except (KeyError, IndexError, TypeError, ValueError):
+            return None
+    return cur
+
+
+def get_media_source(driver, adapter: dict, page_url: str = ''):
+    """Resolve a progressive media URL for the page the driver is on.
+
+    Returns (url, headers, cookies). Players of this shape keep no media URL in
+    the page at all: the markup carries only an opaque, time-limited token, and
+    the real URL is minted by an API call that *also* sets the cookies the CDN
+    then demands — which is why the cookies have to travel with the download and
+    not just the URL, and why the token is read fresh at download time rather
+    than remembered from the analysis pass.
+    """
+    cfg = adapter.get('media') or {}
+    headers = get_request_headers(adapter, video_page_url=page_url)
+    name = adapter.get('name', adapter.get('id'))
+
+    attr_cfg = cfg.get('attr') or {}
+    token = ''
+    if attr_cfg.get('css'):
+        try:
+            token = driver.find_element('css selector', attr_cfg['css']).get_attribute(
+                attr_cfg.get('attr', 'src')
+            ) or ''
+        except Exception:
+            token = ''
+        if not token:
+            raise ValueError(f'無法取得影片參數（{name}），請確認網址是否正確')
+
+    post = cfg.get('post') or {}
+    cookies: dict = {}
+    if post.get('url'):
+        import requests as req
+
+        post_headers = dict(headers)
+        for key, value in (post.get('headers') or {}).items():
+            post_headers[key] = value.replace('{page_url}', page_url)
+        body = token
+        if post.get('decode_value'):
+            # The attribute already holds a percent-encoded value; form-encoding
+            # it again escapes the escapes, and a signed token arrives corrupt.
+            body = unquote(token)
+        response = req.post(
+            post['url'],
+            data={post.get('field', 'd'): body},
+            headers=post_headers,
+            timeout=15,
+        )
+        response.raise_for_status()
+        cookies = response.cookies.get_dict()
+        source = _json_path(response.json(), cfg.get('json_path', ''))
+    else:
+        source = token
+
+    if not isinstance(source, str) or not source:
+        raise ValueError(f'無法解析影片來源（{name}），請確認網址是否正確')
+
+    if source.startswith('//'):
+        # Protocol-relative: the page's scheme is gone by the time we leave the
+        # browser, so the adapter states which one the CDN wants.
+        source = (cfg.get('url_prefix') or 'https:') + source
+    elif not source.startswith('http'):
+        source = _absolutize(driver, source)
+
+    if not cfg.get('carry_cookies', True):
+        cookies = {}
+    return source, headers, cookies
 
 
 def resolve_m3u8_to_stream(m3u8url, request_headers):

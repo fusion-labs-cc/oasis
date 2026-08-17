@@ -28,11 +28,16 @@ export interface AnalysisTask {
   progress?: number;
   // True while the download is waiting its turn in the backend's serial queue.
   queued?: boolean;
+  // Set on the summary row of a listing analysis (an anime season): how many
+  // episodes it produced. The episodes themselves are separate tasks.
+  episodeCount?: number;
 }
 
 interface TasksContextType {
   tasks: AnalysisTask[];
   setTasks: React.Dispatch<React.SetStateAction<AnalysisTask[]>>;
+  // Settle a finished analysis task from the ids it produced.
+  applyAnalysisResult: (taskId: string, ids: number[]) => Promise<void>;
   // Push a direct download (from a card / detail page) into the progress list.
   addDownloadTask: (video: VideoRecord) => void;
   // Flag the download task for this video as canceled (from a card / detail page).
@@ -67,6 +72,78 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem("oasis:tasks", JSON.stringify(tasks));
     }
   }, [tasks]);
+
+  // Settle a finished analysis. One URL can produce many records — a listing
+  // page (an anime season) analyses into one per episode — so this is shared by
+  // the submit handler and the poller rather than written twice; whichever
+  // reaches the task first wins, and the other skips it as no longer analyzing.
+  const applyAnalysisResult = useCallback(
+    async (taskId: string, ids: number[]) => {
+      const records = await Promise.all(ids.map((id) => syncVideo(id)));
+      setTasks((prev) => {
+        const task = prev.find((t) => t.id === taskId);
+        if (!task) return prev;
+
+        if (records.length <= 1) {
+          const record = records[0];
+          return prev.map((t) =>
+            t.id === taskId
+              ? {
+                  ...t,
+                  status: t.download ? "downloading" : "success",
+                  code: record?.code,
+                  title: record?.title_zh_tw || record?.title,
+                  actress: record?.actress || undefined,
+                  videoId: ids[0],
+                }
+              : t
+          );
+        }
+
+        // Many episodes: the pasted task becomes a summary row and each episode
+        // gets its own, so the per-video progress and cancel machinery that
+        // already exists works on them unchanged.
+        const first = records[0];
+        const summary: AnalysisTask = {
+          ...task,
+          status: "success",
+          episodeCount: records.length,
+          title: first?.title_zh_tw || first?.title,
+          videoId: undefined,
+          progress: undefined,
+          queued: undefined,
+        };
+        const episodes: AnalysisTask[] = task.download
+          ? records.flatMap((record) =>
+              record?.id == null
+                ? []
+                : [
+                    {
+                      // Deterministic id so re-applying the same result replaces
+                      // these rows instead of stacking duplicates.
+                      id: `dl-${record.id}-${taskId}`,
+                      url: record.url,
+                      status: "downloading" as const,
+                      code: record.code,
+                      title: record.title_zh_tw || record.title,
+                      actress: record.actress || undefined,
+                      download: true,
+                      videoId: record.id,
+                    },
+                  ]
+            )
+          : [];
+        const episodeIds = new Set(episodes.map((t) => t.id));
+        return [
+          ...episodes,
+          ...prev
+            .map((t) => (t.id === taskId ? summary : t))
+            .filter((t) => !episodeIds.has(t.id)),
+        ];
+      });
+    },
+    [syncVideo]
+  );
 
   // Poll active analyzing, canceling, or downloading tasks in the background.
   useEffect(() => {
@@ -130,23 +207,9 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
           if (!active) return;
 
           if (res.status === "success" && res.id != null) {
-            // Status is just a completion signal + id; fetch the full record now.
-            const record = await syncVideo(res.id);
+            // Status is just a completion signal + ids; fetch the records now.
+            await applyAnalysisResult(task.id, res.ids?.length ? res.ids : [res.id]);
             if (!active) return;
-            setTasks((prev) =>
-              prev.map((t) =>
-                t.id === task.id
-                  ? {
-                      ...t,
-                      status: t.download ? "downloading" : "success",
-                      code: record?.code,
-                      title: record?.title_zh_tw || record?.title,
-                      actress: record?.actress || undefined,
-                      videoId: res.id,
-                    }
-                  : t
-              )
-            );
           } else if (res.status === "error") {
             setTasks((prev) =>
               prev.map((t) =>
@@ -174,7 +237,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
       active = false;
       clearInterval(interval);
     };
-  }, [tasks, status, syncVideo]);
+  }, [tasks, status, syncVideo, applyAnalysisResult]);
 
   const addDownloadTask = useCallback((video: VideoRecord) => {
     if (video.id == null) return;
@@ -215,7 +278,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <TasksContext.Provider
-      value={{ tasks, setTasks, addDownloadTask, markDownloadCanceled }}
+      value={{ tasks, setTasks, applyAnalysisResult, addDownloadTask, markDownloadCanceled }}
     >
       {children}
     </TasksContext.Provider>

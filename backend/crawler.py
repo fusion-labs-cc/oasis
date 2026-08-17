@@ -28,6 +28,13 @@ def reset_stop():
     _stop_event.clear()
 
 
+def is_stop_requested() -> bool:
+    """Has a cancel been signalled? Exposed so the progressive downloader
+    (httpdl.py) honours the same flag: the download worker's SIGTERM handler
+    calls request_stop() without knowing which pipeline is running."""
+    return _stop_event.is_set()
+
+
 def _make_session(dl_headers: dict) -> requests.Session:
     session = requests.Session()
     adapter = HTTPAdapter(

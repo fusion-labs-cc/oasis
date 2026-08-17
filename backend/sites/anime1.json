@@ -1,0 +1,45 @@
+{
+  "id": "anime1",
+  "name": "Anime1",
+  "display_domain": "anime1.me",
+  "domains": ["anime1.me"],
+  "title_selectors": ["h2.entry-title"],
+  "title_suffix_strip": [" – Anime1.me 動畫線上看", " - Anime1.me 動畫線上看"],
+  "tag_selectors": [".cat-links a"],
+  "headers": { "Referer": "{page_url}" },
+  "wait": { "seconds": 1, "css": "article", "timeout": 15 },
+
+  "listing": {
+    "_comment": "分類頁把整季每一集都列在同一頁，每個 article 一集。上層分類（如「2024年冬季」）也是同一種網址形狀，會列出整季所有番並深度分頁，因此 max_pages 是必要的煞車。",
+    "url_patterns": ["/category/", "[?&]cat="],
+    "item_selector": "article",
+    "link": { "css": "h2.entry-title a", "attr": "href" },
+    "title": { "css": "h2.entry-title a" },
+    "series_name": { "css": "h1.page-title" },
+    "tag_selectors": [".cat-links a"],
+    "next_page": { "css": ".pagination .nav-next a, .pagination .nav-previous a", "attr": "href" },
+    "max_pages": 20
+  },
+
+  "code": {
+    "_comment": "文章 id 是每一集唯一且穩定的識別；動畫標題永遠不會命中 catalog.py 的片號樣式，而它的前 20 字後備方案會讓同一部番的各集互相覆蓋。",
+    "from": "url",
+    "pattern": "anime1\\.me/(?:\\?p=)?(\\d+)",
+    "template": "A1-{1}"
+  },
+
+  "media": {
+    "_comment": "非 HLS：頁面只帶一枚有時效的 token（data-apireq），真正的 mp4 網址與 CDN 要求的 cookie 由這支 API 一起發放。",
+    "mode": "http",
+    "attr": { "css": "video[data-apireq]", "attr": "data-apireq" },
+    "post": {
+      "url": "https://v.anime1.me/api",
+      "field": "d",
+      "decode_value": true,
+      "headers": { "Referer": "{page_url}" }
+    },
+    "json_path": "s.0.src",
+    "url_prefix": "https:",
+    "carry_cookies": true
+  }
+}

@@ -72,7 +72,7 @@ The code is machine-generated, not a user's password — that is what lets every
 
 Scraping and downloading are heavy and blocking (Selenium, network I/O, FFmpeg), so `api.py` spawns them as **separate OS processes**, not threads, to keep the event loop responsive.
 
-- **Analyses** run in parallel, keyed by `task_id` in `active_analyses`.
+- **Analyses** run in parallel, keyed by `task_id` in `active_analyses`. One analysis yields a **list** of records, not one — a listing URL produces one per episode — and `_bg_check_analyses` queues each with **its own** URL, never the analysed one: a listing page's URL scrapes no video, and the download worker re-navigates to read the title and media source off the page it is handed.
 - **Downloads are serialised** — exactly one at a time, FIFO through `download_queue`. `_pump_downloads()` reaps the finished one and starts the next; it is driven by `_bg_check_analyses()`, an asyncio loop that ticks every second.
 
 Since worker processes cannot share memory with the API, IPC is done through the filesystem in `$TMPDIR/oasis_progress/`:
@@ -89,9 +89,20 @@ The shipped code contains **no site-specific logic by design**. `site_config.py`
 Two details worth knowing:
 
 - `detect_site()` matches on the host's **registrable-domain label**, never a bare substring, so a look-alike host (`example.com.evil.com`) is rejected before a browser navigates to it.
-- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json`, `missav.json`, and `supjav.json` are committed, and `scripts/app_payload.py` copies the directory into the app payload (`app/sites/`). In a frozen build the adapters actually *loaded* come from a writable `sites/` next to the `.exe`: `run_backend.py` copies the shipped ones into it on every start and **leaves every other file alone**, so a release updates the shipped adapters while a user's own adapters survive updates. (The flip side: editing a shipped adapter in place is reverted on the next start — rename it to keep it.)
+- Adapters in `backend/sites/` **are tracked in git and ship with releases** — `jable.json`, `missav.json`, `supjav.json`, and `anime1.json` are committed, and `scripts/app_payload.py` copies the directory into the app payload (`app/sites/`). In a frozen build the adapters actually *loaded* come from a writable `sites/` next to the `.exe`: `run_backend.py` copies the shipped ones into it on every start and **leaves every other file alone**, so a release updates the shipped adapters while a user's own adapters survive updates. (The flip side: editing a shipped adapter in place is reverted on the next start — rename it to keep it.)
 
-The download pipeline (`download.py`) is: `detect_site` → Selenium extracts the title and m3u8 URL → `resolve_m3u8_to_stream` picks the highest-bandwidth variant from a master playlist → `crawler.py` fetches TS segments across 16 threads (AES-CBC decrypt when keyed, with a **fresh cipher per segment** — CBC is stateful and must never be shared across threads) → merge → FFmpeg remux → move into `movies/`. Overall percent is mapped as: 1% setup, 3–95% segments, 96% merge, 98% encode, 100% done.
+Three optional adapter blocks bend the one-URL-one-HLS-video assumption the engine started with. Each is inert when absent, so an adapter that omits all three behaves exactly as before:
+
+- **`listing`** — one URL analysing into **many records** (an anime season's episodes). `listing.url_patterns` is what decides a URL is a listing, because the engine genuinely cannot tell from the DOM: on most such sites a listing and a single video share the host *and* the page template. `catalog.process_listing_url()` walks the listing (and its `next_page` links) in **one browser session and never opens the item pages** — the listing already carries every title, and a site that lists this way has no per-item cover or cast to go back for. `listing.max_pages` is a hard stop rather than a preference: the same URL shape that lists one show's episodes usually also lists a whole season's worth of shows. `listing.series_name` names an element on the listing page; when present the whole listing is grouped into a **series** and numbered `1..N` in listing order (see *Series*).
+- **`code`** — the catalog's `code` derived from the item's URL. Load-bearing for listings: `videos.code` is `UNIQUE`, `CODE_PATTERN` never matches these titles, and the `full_title[:20]` fallback is *identical* for every episode of a long-named series, so without it a season's episodes upsert over each other.
+- **`media`** — a **second download pipeline** for sites serving one progressive MP4 rather than an HLS playlist (`media.mode: "http"`; absent ⇒ `"hls"`). These players keep no media URL in the page at all: the markup holds an opaque, time-limited token, and an API call exchanges it for the URL *and* sets cookies the CDN then demands — which is why `get_media_source()` returns cookies alongside the URL, and why the token is read fresh at download time instead of being remembered from the analysis pass. `post.decode_value` exists because such a token is usually already percent-encoded; form-encoding it a second time escapes the escapes and the signature arrives corrupt.
+
+The download pipeline (`download.py`) branches on `media_mode(adapter)`. Both paths start the same — `detect_site` → Selenium extracts the title — then:
+
+- **`hls` (default)**: Selenium extracts the m3u8 URL → `resolve_m3u8_to_stream` picks the highest-bandwidth variant from a master playlist → `crawler.py` fetches TS segments across 16 threads (AES-CBC decrypt when keyed, with a **fresh cipher per segment** — CBC is stateful and must never be shared across threads) → merge → FFmpeg remux → move into `movies/`. Percent: 1% setup, 3–95% segments, 96% merge, 98% encode, 100% done.
+- **`http`**: `get_media_source` resolves the URL + cookies → `httpdl.py` streams it to one file, resuming from a partial via a `Range` request (the same "keep what's on disk" contract the segment crawler has, so a plain shutdown resumes rather than restarts) → move into `movies/`. There is nothing to stitch and the source is already MP4, so merge and FFmpeg are skipped. Percent: 1% setup, 3–98% bytes, 100% done.
+
+`httpdl` honours the crawler's cancel flag through `crawler.is_stop_requested()` — the download worker's SIGTERM handler calls `request_stop()` without knowing which pipeline is running. It **raises rather than returning short** on a cancel or a truncated response, because the caller's next step is to move the file into `movies/`, where a truncated file would look downloaded.
 
 ### Source checkout vs. frozen build
 
@@ -147,9 +158,22 @@ Three nested providers in `SiteChrome`, each depending on the one above:
 
 1. **`BackendProvider`** — health polling (10s connected, 3s retrying), plus the `oasis:authorized` gate flag. An inline script in `layout.tsx` reads that flag before first paint to avoid flashing the entrance gate at returning users.
 2. **`VideoProvider`** — the catalog store. The whole catalog is fetched once; **filtering and faceting happen client-side** (`computeFacets`).
-3. **`TasksProvider`** — the analysis/download task list, driven by polling. There are no websockets or SSE anywhere; every live update in the UI is a poll.
+3. **`TasksProvider`** — the analysis/download task list, driven by polling. There are no websockets or SSE anywhere; every live update in the UI is a poll. `applyAnalysisResult()` settles a finished analysis and is shared by the submit handler and the poller (both race to it; whichever arrives second sees the task is no longer `analyzing` and skips). A multi-record result turns the pasted task into a **summary row** and gives each episode its own task, so the per-video progress and cancel machinery works on them unchanged.
 
 Tags are stored as JSON text in SQLite, so tag filtering is done **in Python over decoded rows, not via SQL `LIKE`** (which would mishandle CJK). Metadata (code / actress / title) is regex-extracted from the scraped page title, then Japanese titles are machine-translated to zh-TW via `deep-translator`.
+
+### Series
+
+A **series** groups videos that belong together (an anime season). One video is in at most one series — `videos.series_id` plus an `episode` number; the many-to-many case is what tags are already for. `series.name` is `UNIQUE`, which is what makes "create this series" idempotent: re-analysing a season rejoins its series instead of growing a second one with the same name. There is deliberately **no `FOREIGN KEY`** — SQLite enforces one only when every connection sets `PRAGMA foreign_keys=ON`, which this codebase does not, so `delete_series()` clears its members itself, in the same transaction.
+
+Reads join the series **name** in (`catalog._VIDEO_SELECT`) rather than returning a bare id, so a card renders its chip without the frontend having to load and hold a second list. Export carries the name too, never the id — ids are local to one database, and a round-trip through another would otherwise silently drop the grouping.
+
+Two ordering details in the catalog grid (`page.tsx`) exist because of series:
+
+- **Series sort as a block, never as individual videos.** Each series gets one sort key (`seriesRank`) and its members then run in episode order. Sorting them individually would scatter a hand-assembled series across the grid, and would also make the comparator inconsistent — episode order between members but date order against everyone else is not a total order, which `Array.sort` does not promise to handle sanely.
+- **`id` is the final tiebreak on every sort.** SQLite stamps `created_at` only to the second, so a whole season written in one pass shares a single timestamp; without the tiebreak its order falls back to undefined.
+
+Episode numbers are handed out in the order the ids arrive, so the bulk-assign path sends them in **the order the user is looking at** (the grid's), not the catalog's internal one. Assignment is one request for the whole selection, not one per video: the backend numbers from the series' current maximum, so parallel single calls would race for the same number.
 
 `AwakeMode` is a "boss key" that disguises the whole site as Google (default `⌘X` / `Alt+X`), including the tab title and favicon, persisted across reloads. It, and the keyboard shortcuts, are configured in `web/src/lib/settings.ts` (localStorage).
 

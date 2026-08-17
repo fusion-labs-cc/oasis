@@ -14,8 +14,10 @@ from selenium.webdriver.chrome.service import Service
 from site_config import (
     detect_site, get_video_name, get_m3u8_url,
     setup_driver_for_site, wait_for_page_load,
-    get_request_headers, resolve_m3u8_to_stream, build_ts_url
+    get_request_headers, resolve_m3u8_to_stream, build_ts_url,
+    media_mode, get_media_source
 )
+from httpdl import download_file
 
 _active_driver = None
 _active_folder_path = None
@@ -46,6 +48,8 @@ def download(url, progress_cb=None):
 
   # 依 URL 選出對應的站台 adapter（使用者自備，見 backend/sites.example.json）
   adapter = detect_site(url)
+  # 'hls'（m3u8 + ts 片段，預設）或 'http'（單一漸進式檔案）
+  mode = media_mode(adapter)
   print(f'偵測到站台: {adapter.get("name", adapter.get("id"))}')
   print('正在下載影片: ' + url)
 
@@ -92,81 +96,98 @@ def download(url, progress_cb=None):
       folderPath = dirPath
       _active_folder_path = folderPath
 
-      # 取得 m3u8 網址（使用網站特定的方法）
-      m3u8url = get_m3u8_url(dr, adapter)
-      print(f'm3u8url: {m3u8url}')
-
-      # 取得下載用的 HTTP 標頭（含 Referer 等）
-      dl_headers = get_request_headers(adapter, video_page_url=url)
-
-      # 處理主播放清單 → 取得實際串流播放清單
-      stream_m3u8url = resolve_m3u8_to_stream(m3u8url, dl_headers)
-
-      # 得到串流 m3u8 的基底網址
-      m3u8urlList = stream_m3u8url.split('/')
-      m3u8urlList.pop(-1)
-      downloadurl = '/'.join(m3u8urlList)
-
-      # 下載串流 m3u8 檔案（使用 requests 帶標頭）
-      m3u8file = os.path.join(folderPath, video_name + '.m3u8')
-      response = requests.get(stream_m3u8url, headers=dl_headers, timeout=15)
-      response.raise_for_status()
-      with open(m3u8file, 'wb') as f:
-          f.write(response.content)
-
-      # 得到 m3u8 file裡的 URI和 IV
-      m3u8obj = m3u8.load(m3u8file)
-      m3u8uri = ''
-      m3u8iv = ''
-
-      for key in m3u8obj.keys:
-          if key:
-              m3u8uri = key.uri
-              m3u8iv = key.iv
-
-      # 儲存 ts網址 in tsList（處理絕對/相對 URL）
-      tsList = []
-      for seg in m3u8obj.segments:
-          tsUrl = build_ts_url(seg.uri, downloadurl)
-          tsList.append(tsUrl)
-
-      # 有加密
-      if m3u8uri:
-          m3u8keyurl = build_ts_url(m3u8uri, downloadurl)
-          response = requests.get(m3u8keyurl, headers=dl_headers, timeout=10)
-          contentKey = response.content
-          iv = m3u8iv.replace("0x", "")[:16].encode()
+      if mode == 'http':
+        # 單一漸進式檔案：來源網址與 cookie 由 adapter 描述的 API 取得
+        media_url, dl_headers, media_cookies = get_media_source(dr, adapter, page_url=url)
+        print(f'影片來源: {media_url}')
       else:
-          contentKey = None
-          iv = None
+        # 取得 m3u8 網址（使用網站特定的方法）
+        m3u8url = get_m3u8_url(dr, adapter)
+        print(f'm3u8url: {m3u8url}')
+
+        # 取得下載用的 HTTP 標頭（含 Referer 等）
+        dl_headers = get_request_headers(adapter, video_page_url=url)
+
+        # 處理主播放清單 → 取得實際串流播放清單
+        stream_m3u8url = resolve_m3u8_to_stream(m3u8url, dl_headers)
+
+        # 得到串流 m3u8 的基底網址
+        m3u8urlList = stream_m3u8url.split('/')
+        m3u8urlList.pop(-1)
+        downloadurl = '/'.join(m3u8urlList)
+
+        # 下載串流 m3u8 檔案（使用 requests 帶標頭）
+        m3u8file = os.path.join(folderPath, video_name + '.m3u8')
+        response = requests.get(stream_m3u8url, headers=dl_headers, timeout=15)
+        response.raise_for_status()
+        with open(m3u8file, 'wb') as f:
+            f.write(response.content)
+
+        # 得到 m3u8 file裡的 URI和 IV
+        m3u8obj = m3u8.load(m3u8file)
+        m3u8uri = ''
+        m3u8iv = ''
+
+        for key in m3u8obj.keys:
+            if key:
+                m3u8uri = key.uri
+                m3u8iv = key.iv
+
+        # 儲存 ts網址 in tsList（處理絕對/相對 URL）
+        tsList = []
+        for seg in m3u8obj.segments:
+            tsUrl = build_ts_url(seg.uri, downloadurl)
+            tsList.append(tsUrl)
+
+        # 有加密
+        if m3u8uri:
+            m3u8keyurl = build_ts_url(m3u8uri, downloadurl)
+            response = requests.get(m3u8keyurl, headers=dl_headers, timeout=10)
+            contentKey = response.content
+            iv = m3u8iv.replace("0x", "")[:16].encode()
+        else:
+            contentKey = None
+            iv = None
   finally:
       dr.quit()
       _active_driver = None
 
-  # 刪除m3u8 file
-  deleteM3u8(folderPath)
+  if mode == 'http':
+      # 單一檔案：沒有片段可合成，來源本身已是 mp4，故跳過合成與轉檔。
+      # 下載佔整體進度的 3%–98%。
+      _report(3)
+      download_file(
+          media_url,
+          os.path.join(folderPath, f'{video_name}.mp4'),
+          headers=dl_headers,
+          cookies=media_cookies,
+          progress_cb=lambda done, total: _report(3 + done / total * 95),
+      )
+  else:
+      # 刪除m3u8 file
+      deleteM3u8(folderPath)
 
-  # 準備完成，開始下載片段（片段下載佔整體進度的 3%–95%）
-  _report(3)
+      # 準備完成，開始下載片段（片段下載佔整體進度的 3%–95%）
+      _report(3)
 
-  # 開始爬蟲並下載mp4片段至資料夾（傳入下載用標頭）
-  # 片段進度 (done/total) 線性映射到整體的 3%–95%，保留尾段給合成/轉檔。
-  prepareCrawl(
-      contentKey, iv, folderPath, tsList, dl_headers,
-      progress_cb=lambda done, total: _report(3 + done / total * 92),
-      strip_header=bool((adapter.get('download') or {}).get('strip_fake_header')),
-  )
+      # 開始爬蟲並下載mp4片段至資料夾（傳入下載用標頭）
+      # 片段進度 (done/total) 線性映射到整體的 3%–95%，保留尾段給合成/轉檔。
+      prepareCrawl(
+          contentKey, iv, folderPath, tsList, dl_headers,
+          progress_cb=lambda done, total: _report(3 + done / total * 92),
+          strip_header=bool((adapter.get('download') or {}).get('strip_fake_header')),
+      )
 
-  # 合成mp4
-  _report(96)
-  mergeMp4(folderPath, tsList)
+      # 合成mp4
+      _report(96)
+      mergeMp4(folderPath, tsList)
 
-  # 刪除子mp4
-  deleteMp4(folderPath)
+      # 刪除子mp4
+      deleteMp4(folderPath)
 
-  # 轉檔
-  _report(98)
-  ffmpegEncode(folderPath, video_name, encode)
+      # 轉檔
+      _report(98)
+      ffmpegEncode(folderPath, video_name, encode)
 
   # 移出資料夾並刪除資料夾
   src = os.path.join(folderPath, f'{video_name}.mp4')

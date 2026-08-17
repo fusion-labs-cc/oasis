@@ -58,5 +58,39 @@
   },
   "download": {
     "strip_fake_header": false
+  },
+
+  "_comment_media": "OPTIONAL. Only for sites that serve one progressive file (mp4) instead of an HLS playlist; omit it and the m3u8 block above is used. 'attr' reads an opaque token out of the markup, 'post' exchanges it for the real URL, and the response's cookies travel with the download — such CDNs reject a request that carries only the URL. decode_value: the attribute already holds a percent-encoded value, so form-encoding it again would corrupt it. json_path walks the JSON response ('.' separated, a number indexes a list).",
+  "media": {
+    "mode": "http",
+    "attr": {"css": "video[data-token]", "attr": "data-token"},
+    "post": {
+      "url": "https://cdn.example.com/api",
+      "field": "d",
+      "decode_value": true,
+      "headers": {"Referer": "{page_url}"}
+    },
+    "json_path": "sources.0.src",
+    "url_prefix": "https:",
+    "carry_cookies": true
+  },
+
+  "_comment_listing": "OPTIONAL. Lets one URL analyse into many records — a season's episodes, a playlist. url_patterns decides whether a URL is a listing (the engine cannot tell from the DOM; a listing and a single video share the host and often the template). max_pages is a hard stop, not a preference: the same URL shape usually also lists a whole season's worth of shows. series_name, when set, groups every item into a catalog series named after the listing, numbering them 1..N in listing order.",
+  "listing": {
+    "url_patterns": ["/category/"],
+    "item_selector": "article",
+    "link": {"css": "h2.entry-title a", "attr": "href"},
+    "title": {"css": "h2.entry-title a"},
+    "series_name": {"css": "h1.page-title"},
+    "tag_selectors": [".cat-links a"],
+    "next_page": {"css": ".pagination .nav-next a", "attr": "href"},
+    "max_pages": 20
+  },
+
+  "_comment_code": "OPTIONAL. Builds the catalog's UNIQUE code from the URL (from: 'title' matches the title instead). Needed when the site's titles carry no studio code: the fallback is the title's first 20 characters, which is identical for every episode of one series, so they would overwrite each other. {1}, {2}… are the pattern's capture groups.",
+  "code": {
+    "from": "url",
+    "pattern": "example\\.com/(\\d+)",
+    "template": "EX-{1}"
   }
 }

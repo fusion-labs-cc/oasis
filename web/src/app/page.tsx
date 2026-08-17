@@ -4,12 +4,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { computeFacets, coverUrl, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord } from "@/lib/api";
+import { computeFacets, coverUrl, fetchSeries, deleteVideo, downloadVideo, cancelDownload, openInPlayer, safeExternalHref, toExportedVideo, ExportedVideo, Facets, VideoRecord, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks } from "@/context/TasksContext";
 import SupportedSites from "@/components/SupportedSites";
 import ImportExportModal from "@/components/ImportExportModal";
+import SeriesAssignModal from "@/components/SeriesAssignModal";
+import SeriesEditModal from "@/components/SeriesEditModal";
+import SeriesCard from "@/components/SeriesCard";
+import VideoCard from "@/components/VideoCard";
 
 type DownloadFilter = "all" | "downloaded" | "not_downloaded";
 type SortKey = "added_desc" | "added_asc" | "plays_desc" | "plays_asc";
@@ -18,6 +22,12 @@ const SORT_KEYS: SortKey[] = ["added_desc", "added_asc", "plays_desc", "plays_as
 const DOWNLOAD_FILTERS: DownloadFilter[] = ["all", "downloaded", "not_downloaded"];
 const SORT_KEY_STORAGE = "oasis:sort_key";
 const DOWNLOAD_FILTER_STORAGE = "oasis:download_filter";
+const GROUP_SERIES_STORAGE = "oasis:group_series";
+
+// One tile in the grid: a single video, or a whole series collapsed into one.
+type GridItem =
+  | { kind: "video"; key: string; video: VideoRecord }
+  | { kind: "series"; key: string; id: number; name: string; episodes: VideoRecord[] };
 
 function isDownloaded(v: VideoRecord): boolean {
   return Boolean(v.video_path && v.local_file_exists);
@@ -26,7 +36,7 @@ function isDownloaded(v: VideoRecord): boolean {
 export default function Home() {
   // Full catalog lives in the shared VideoContext so it survives navigation.
   // Filtering below is all client-side.
-  const { videos: allVideos, loading: loadingList, error, updateVideo, removeVideo } = useVideos();
+  const { videos: allVideos, loading: loadingList, error, updateVideo, removeVideo, refresh } = useVideos();
 
   // Filters
   const [selectedActress, setSelectedActress] = useState<string | null>(null);
@@ -36,6 +46,9 @@ export default function Home() {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [downloadFilter, setDownloadFilter] = useState<DownloadFilter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("added_desc");
+  // Collapse each series into a single tile. On by default: a 12-episode season
+  // otherwise buries everything else under near-identical cards.
+  const [groupSeries, setGroupSeries] = useState(true);
   // Mobile-only collapsible for the filter panel — the sidebar is xl-only.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -47,7 +60,23 @@ export default function Home() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [exportSelectionOpen, setExportSelectionOpen] = useState(false);
+  const [seriesAssignOpen, setSeriesAssignOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [seriesList, setSeriesList] = useState<SeriesRecord[]>([]);
+  const [editingSeries, setEditingSeries] = useState<{
+    record: SeriesRecord;
+    episodes: VideoRecord[];
+  } | null>(null);
+
+  const loadSeries = useCallback(() => {
+    fetchSeries()
+      .then(setSeriesList)
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (mounted) loadSeries();
+  }, [mounted, loadSeries]);
 
   const toast = useToast();
   const [lastWatched, setLastWatched] = useState<{
@@ -149,6 +178,10 @@ export default function Home() {
     if (storedFilter && DOWNLOAD_FILTERS.includes(storedFilter as DownloadFilter)) {
       setDownloadFilter(storedFilter as DownloadFilter);
     }
+    const storedGroup = localStorage.getItem(GROUP_SERIES_STORAGE);
+    if (storedGroup !== null) {
+      setGroupSeries(storedGroup === "1");
+    }
   }, []);
 
   useEffect(() => {
@@ -159,9 +192,44 @@ export default function Home() {
     localStorage.setItem(DOWNLOAD_FILTER_STORAGE, downloadFilter);
   }, [downloadFilter]);
 
+  useEffect(() => {
+    localStorage.setItem(GROUP_SERIES_STORAGE, groupSeries ? "1" : "0");
+  }, [groupSeries]);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const facets = useMemo(() => computeFacets(allVideos), [allVideos]);
+  const hasSeries = useMemo(() => allVideos.some((v) => v.series_id != null), [allVideos]);
+
+  // One sort key per series, so its members sort as a single block wherever the
+  // series as a whole belongs. Sorting them individually would scatter a
+  // hand-assembled series across the grid by add date, and would also make the
+  // comparator inconsistent — episode order between members but date order
+  // against everyone else is not a total order, which Array.sort does not
+  // promise to handle sanely.
+  const seriesRank = useMemo(() => {
+    const rank = new Map<
+      number,
+      { addedMin: number; addedMax: number; playsMin: number; playsMax: number; minId: number }
+    >();
+    for (const v of allVideos) {
+      if (v.series_id == null) continue;
+      const t = new Date(v.created_at ?? 0).getTime();
+      const p = v.play_count ?? 0;
+      const id = v.id ?? 0;
+      const cur = rank.get(v.series_id);
+      if (!cur) {
+        rank.set(v.series_id, { addedMin: t, addedMax: t, playsMin: p, playsMax: p, minId: id });
+      } else {
+        cur.addedMin = Math.min(cur.addedMin, t);
+        cur.addedMax = Math.max(cur.addedMax, t);
+        cur.playsMin = Math.min(cur.playsMin, p);
+        cur.playsMax = Math.max(cur.playsMax, p);
+        cur.minId = Math.min(cur.minId, id);
+      }
+    }
+    return rank;
+  }, [allVideos]);
 
   const videos = useMemo(() => {
     const kw = searchKeyword.trim().toLowerCase();
@@ -196,25 +264,45 @@ export default function Home() {
 
     // The backend already returns newest-first, so "added_desc" is a no-op sort
     // — still run it through for a stable, explicit ordering.
-    const sorted = [...filtered].sort((a, b) => {
+    //
+    // A series sorts by its block key, never by its members individually, and
+    // its members then run in episode order. The final `id` tiebreak matters
+    // more than it looks: SQLite stamps created_at only to the second, so a
+    // whole season written in one pass shares one timestamp and would otherwise
+    // fall back to an undefined order.
+    const descending = sortKey === "added_desc" || sortKey === "plays_desc";
+    const blockKey = (v: VideoRecord) => {
+      const r = v.series_id != null ? seriesRank.get(v.series_id) : undefined;
       switch (sortKey) {
         case "added_asc":
-          return (
-            new Date(a.created_at ?? 0).getTime() - new Date(b.created_at ?? 0).getTime()
-          );
+          return r ? r.addedMin : new Date(v.created_at ?? 0).getTime();
         case "plays_desc":
-          return (b.play_count ?? 0) - (a.play_count ?? 0);
+          return r ? r.playsMax : v.play_count ?? 0;
         case "plays_asc":
-          return (a.play_count ?? 0) - (b.play_count ?? 0);
-        case "added_desc":
+          return r ? r.playsMin : v.play_count ?? 0;
         default:
-          return (
-            new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime()
-          );
+          return r ? r.addedMax : new Date(v.created_at ?? 0).getTime();
       }
+    };
+    // Identifies the block a video belongs to, so two series that tie on the
+    // key stay contiguous instead of interleaving.
+    const blockId = (v: VideoRecord) =>
+      (v.series_id != null ? seriesRank.get(v.series_id)?.minId : undefined) ?? v.id ?? 0;
+
+    const dir = descending ? -1 : 1;
+    const sorted = [...filtered].sort((a, b) => {
+      const byKey = blockKey(a) - blockKey(b);
+      if (byKey) return dir * byKey;
+      const byBlock = blockId(a) - blockId(b);
+      if (byBlock) return dir * byBlock;
+      // Same block: within one series that means episode order, always ascending.
+      if (a.series_id != null && a.series_id === b.series_id) {
+        return (a.episode ?? 0) - (b.episode ?? 0) || (a.id ?? 0) - (b.id ?? 0);
+      }
+      return dir * ((a.id ?? 0) - (b.id ?? 0));
     });
     return sorted;
-  }, [allVideos, selectedActress, selectedTags, match, searchKeyword, downloadFilter, sortKey]);
+  }, [allVideos, selectedActress, selectedTags, match, searchKeyword, downloadFilter, sortKey, seriesRank]);
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -225,6 +313,32 @@ export default function Home() {
   function toggleActress(name: string) {
     setSelectedActress((prev) => (prev === name ? null : name));
   }
+
+
+
+  const handleOpenEditSeries = useCallback(
+    (seriesName: string) => {
+      const eps = allVideos.filter((v) => v.series === seriesName);
+      const existing = seriesList.find((s) => s.name === seriesName);
+      if (existing) {
+        setEditingSeries({ record: existing, episodes: eps });
+      } else {
+        fetchSeries().then((rows) => {
+          setSeriesList(rows);
+          const found = rows.find((s) => s.name === seriesName);
+          if (found) {
+            setEditingSeries({ record: found, episodes: eps });
+          } else {
+            setEditingSeries({
+              record: { id: 0, name: seriesName, count: eps.length },
+              episodes: eps,
+            });
+          }
+        });
+      }
+    },
+    [allVideos, seriesList]
+  );
 
   function clearFilters() {
     setSelectedActress(null);
@@ -302,6 +416,67 @@ export default function Home() {
     for (const id of selectedIds) if (!visible.has(id)) n++;
     return n;
   }, [videos, selectedIds]);
+
+  // Collapse each series into one tile. Turned off inside a series (the user is
+  // already looking at its episodes) and in select mode, where the whole point
+  // is picking individual videos.
+  const gridItems = useMemo<GridItem[]>(() => {
+    const keyOf = (v: VideoRecord) => String(v.id ?? v.code);
+    if (!groupSeries || selectMode) {
+      return videos.map((v) => ({ kind: "video", key: keyOf(v), video: v }));
+    }
+
+    const items: GridItem[] = [];
+    let i = 0;
+    while (i < videos.length) {
+      const v = videos[i];
+      const sid = v.series_id;
+      if (sid == null) {
+        items.push({ kind: "video", key: keyOf(v), video: v });
+        i++;
+        continue;
+      }
+      // The sort keeps a series contiguous, so its members are one run and a
+      // single linear pass is enough to find them.
+      let j = i;
+      while (j < videos.length && videos[j].series_id === sid) j++;
+      const run = videos.slice(i, j);
+      // A one-episode series is not worth a tile that hides its own title.
+      if (run.length > 1) {
+        items.push({ kind: "series", key: `series-${sid}`, id: sid, name: v.series ?? "", episodes: run });
+      } else {
+        items.push({ kind: "video", key: keyOf(v), video: v });
+      }
+      i = j;
+    }
+    return items;
+  }, [videos, groupSeries, selectMode]);
+
+  // Episode numbers are handed out in the order these ids arrive, so they have
+  // to follow the order the user is looking at — the grid's — not the catalog's
+  // internal one. Selections hidden by the current filter have no on-screen
+  // position, so they trail behind in catalog order.
+  const selectionInDisplayOrder = useMemo(() => {
+    const visible = videos.filter((v) => v.id != null && selectedIds.has(v.id));
+    const seen = new Set(visible.map((v) => v.id));
+    const hidden = allVideos.filter(
+      (v) => v.id != null && selectedIds.has(v.id) && !seen.has(v.id),
+    );
+    return [...visible, ...hidden].map((v) => v.id!);
+  }, [videos, allVideos, selectedIds]);
+
+  // The assignment already happened server-side; refetch rather than patch each
+  // record, since the backend decided the episode numbers and we don't know them.
+  async function handleSeriesAssigned(seriesName: string, count: number) {
+    setSelectedIds(new Set());
+    await refresh({ silent: true });
+    toast(
+      count > 0
+        ? `已將 ${count} 部影片加入「${seriesName}」`
+        : `所選影片都已在「${seriesName}」中`,
+      { type: count > 0 ? "success" : "info" },
+    );
+  }
 
   async function handleBulkDelete() {
     if (bulkBusy || selectedIds.size === 0) return;
@@ -594,9 +769,14 @@ export default function Home() {
                 setDownloadFilter={setDownloadFilter}
                 sortKey={sortKey}
                 setSortKey={setSortKey}
+                groupSeries={groupSeries}
+                setGroupSeries={setGroupSeries}
+                hasSeries={hasSeries}
               />
             </div>
           )}
+
+
 
           {/* Selection toolbar — appears in select mode. Selection is kept by id
               above the filter, so counts include videos hidden by the filter. */}
@@ -627,6 +807,14 @@ export default function Home() {
                   className="rounded-lg border border-border-hairline bg-surface-elevated px-3 py-1.5 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   清除選取
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSeriesAssignOpen(true)}
+                  disabled={selectedIds.size === 0 || bulkBusy}
+                  className="rounded-lg border border-border-hairline bg-surface-elevated px-3 py-1.5 text-xs font-semibold text-text-secondary transition hover:bg-surface-highest hover:text-text-primary disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  加入系列
                 </button>
                 <button
                   type="button"
@@ -725,17 +913,28 @@ export default function Home() {
             </div>
           ) : (
             <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 2xl:grid-cols-4">
-              {videos.map((v) => (
-                <VideoCard
-                  key={v.id ?? v.code}
-                  video={v}
-                  selectedTags={selectedTags}
-                  onTagClick={toggleTag}
-                  selectMode={selectMode}
-                  selected={v.id != null && selectedIds.has(v.id)}
-                  onToggleSelect={toggleSelect}
-                />
-              ))}
+              {gridItems.map((item) =>
+                item.kind === "series" ? (
+                  <SeriesCard
+                    key={item.key}
+                    id={item.id}
+                    name={item.name}
+                    episodes={item.episodes}
+                    seriesObj={seriesList.find((s) => s.id === item.id || s.name === item.name)}
+                    onEditCover={handleOpenEditSeries}
+                  />
+                ) : (
+                  <VideoCard
+                    key={item.key}
+                    video={item.video}
+                    selectedTags={selectedTags}
+                    onTagClick={toggleTag}
+                    selectMode={selectMode}
+                    selected={item.video.id != null && selectedIds.has(item.video.id)}
+                    onToggleSelect={toggleSelect}
+                  />
+                )
+              )}
             </ul>
           )}
         </section>
@@ -756,6 +955,9 @@ export default function Home() {
             setDownloadFilter={setDownloadFilter}
             sortKey={sortKey}
             setSortKey={setSortKey}
+            groupSeries={groupSeries}
+            setGroupSeries={setGroupSeries}
+            hasSeries={hasSeries}
           />
         </div>
       </aside>
@@ -769,6 +971,37 @@ export default function Home() {
         exportData={selectedExportData}
         subtitle={`匯出所選 ${selectedExportData.length} 部影片（僅中繼資料，不含影片檔）`}
         onClose={() => setExportSelectionOpen(false)}
+      />
+
+      {/* Put the current selection into a series. */}
+      <SeriesAssignModal
+        isOpen={seriesAssignOpen}
+        videoIds={selectionInDisplayOrder}
+        onClose={() => setSeriesAssignOpen(false)}
+        onAssigned={handleSeriesAssigned}
+      />
+
+      {/* Edit series modal (name & cover) */}
+      <SeriesEditModal
+        isOpen={editingSeries != null}
+        onClose={() => setEditingSeries(null)}
+        series={editingSeries?.record ?? null}
+        episodes={editingSeries?.episodes ?? []}
+        onUpdated={(updatedSeries) => {
+          setSeriesList((prev) => {
+            const idx = prev.findIndex((s) => s.id === updatedSeries.id);
+            if (idx === -1) return [...prev, updatedSeries];
+            const next = [...prev];
+            next[idx] = updatedSeries;
+            return next;
+          });
+          if (editingSeries?.record && editingSeries.record.name !== updatedSeries.name) {
+            loadSeries();
+          }
+          loadSeries();
+          refresh();
+          toast("✅ 已更新系列封面與資料");
+        }}
       />
     </div>
   );
@@ -788,6 +1021,9 @@ function FilterPanel({
   setDownloadFilter,
   sortKey,
   setSortKey,
+  groupSeries,
+  setGroupSeries,
+  hasSeries,
 }: {
   facets: Facets;
   selectedActress: string | null;
@@ -800,6 +1036,9 @@ function FilterPanel({
   setDownloadFilter: (f: DownloadFilter) => void;
   sortKey: SortKey;
   setSortKey: (s: SortKey) => void;
+  groupSeries: boolean;
+  setGroupSeries: (g: boolean) => void;
+  hasSeries: boolean;
 }) {
   return (
     <>
@@ -819,6 +1058,31 @@ function FilterPanel({
           <option value="plays_asc">播放次數：低到高</option>
         </select>
       </div>
+
+      {/* Only worth showing once something is actually grouped. */}
+      {hasSeries && (
+        <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
+          <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
+            系列顯示
+          </span>
+          <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
+            {([[true, "合併為系列"], [false, "顯示每一集"]] as const).map(([key, label]) => (
+              <button
+                key={String(key)}
+                type="button"
+                onClick={() => setGroupSeries(key)}
+                className={`px-2 py-1.5 flex-1 text-center font-medium transition cursor-pointer ${
+                  groupSeries === key
+                    ? "bg-accent text-neutral-950 font-bold"
+                    : "text-text-secondary hover:bg-surface-highest"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Download status */}
       <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
@@ -962,268 +1226,5 @@ function formatTime(seconds: number): string {
   return parts.join(":");
 }
 
-function VideoCard({
-  video,
-  selectedTags,
-  onTagClick,
-  selectMode,
-  selected,
-  onToggleSelect,
-}: {
-  video: VideoRecord;
-  selectedTags: string[];
-  onTagClick: (tag: string) => void;
-  selectMode: boolean;
-  selected: boolean;
-  onToggleSelect: (id: number) => void;
-}) {
-  const toast = useToast();
-  const { updateVideo } = useVideos();
-  const { addDownloadTask, markDownloadCanceled } = useTasks();
-  const [downloading, setDownloading] = useState(false);
-  const [playCount, setPlayCount] = useState(video.play_count ?? 0);
-  const [mounted, setMounted] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const isDownloading = downloading || video.is_downloading;
-
-  // Drop the optimistic flag once the server's view of this video is
-  // authoritative — either it confirms the download or the file has landed.
-  useEffect(() => {
-    if (video.is_downloading || video.video_path) setDownloading(false);
-  }, [video.is_downloading, video.video_path]);
-
-  // Keep the displayed count in sync with server refreshes.
-  useEffect(() => {
-    setPlayCount(video.play_count ?? 0);
-  }, [video.play_count]);
-
-  async function handleOpen(e: React.MouseEvent) {
-    e.preventDefault();
-    try {
-      const res = await openInPlayer(video.id!);
-      if (typeof res.play_count === "number") {
-        setPlayCount(res.play_count);
-        updateVideo(video.id!, { play_count: res.play_count });
-      }
-      localStorage.setItem("oasis:last_watched_id", String(video.id));
-      localStorage.setItem("oasis:last_watched_type", "play");
-      window.dispatchEvent(new Event("oasis:last_watched_changed"));
-      toast("已用電腦播放器開啟", { type: "success" });
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), { type: "error" });
-    }
-  }
-
-  async function handleDownload(e: React.MouseEvent) {
-    e.preventDefault();
-    if (isDownloading) return;
-    setDownloading(true);
-    try {
-      await downloadVideo(video.id!);
-      updateVideo(video.id!, { is_downloading: true });
-      addDownloadTask(video);
-      toast("已開始在背景下載影片！", { type: "success" });
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), { type: "error" });
-      setDownloading(false);
-    }
-  }
-
-  async function handleCancelDownload(e: React.MouseEvent) {
-    e.preventDefault();
-    if (!video.id) return;
-    try {
-      await cancelDownload(video.id);
-      setDownloading(false);
-      updateVideo(video.id, { is_downloading: false });
-      markDownloadCanceled(video.id);
-      toast("已取消下載影片！", { type: "info" });
-    } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), { type: "error" });
-    }
-  }
-
-  const handleOriginalSiteClick = () => {
-    localStorage.setItem("oasis:last_watched_id", String(video.id));
-    localStorage.setItem("oasis:last_watched_type", "original_site");
-    window.dispatchEvent(new Event("oasis:last_watched_changed"));
-  };
-
-  return (
-    <li
-      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-surface-elevated tactile-card h-full transition ${
-        selected
-          ? "border-accent ring-2 ring-accent/60"
-          : "border-border-hairline"
-      }`}
-    >
-      {/* Selection overlay: in select mode the whole card toggles selection and
-          the underlying links/buttons are covered so they don't fire. */}
-      {selectMode && (
-        <>
-          <button
-            type="button"
-            onClick={() => video.id != null && onToggleSelect(video.id)}
-            aria-pressed={selected}
-            aria-label={selected ? "取消選取此影片" : "選取此影片"}
-            className="absolute inset-0 z-20 cursor-pointer bg-accent/0 hover:bg-accent/5 transition"
-          />
-          <div
-            className={`pointer-events-none absolute left-3 top-3 z-30 flex h-6 w-6 items-center justify-center rounded-md border text-[13px] font-bold shadow-sm ${
-              selected
-                ? "border-accent bg-accent text-neutral-950"
-                : "border-white/70 bg-neutral-900/60 text-transparent"
-            }`}
-          >
-            ✓
-          </div>
-        </>
-      )}
-      <Link href={`/video/${video.id}`} className="block relative aspect-video w-full overflow-hidden bg-surface-highest">
-        {mounted && coverUrl(video) ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={coverUrl(video)!}
-            alt={video.code}
-            className="aspect-video w-full object-cover transition-transform duration-500 group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-surface-highest to-surface-elevated text-xs font-mono font-bold text-text-tertiary">
-            NO COVER
-          </div>
-        )}
-
-        {/* Download progress overlay: a filled bar once the backend reports a
-            percent, an indeterminate pulse while queued or before the first
-            percent arrives. */}
-        {isDownloading && (
-          <div className="absolute inset-x-0 bottom-0 z-10 h-1.5 bg-neutral-950/50 overflow-hidden">
-            {!video.download_queued && typeof video.download_progress === "number" ? (
-              <div
-                className="h-full bg-accent transition-all duration-700 ease-out shadow-[0_0_6px_rgba(16,185,129,0.6)]"
-                style={{ width: `${video.download_progress}%` }}
-              />
-            ) : (
-              <div className="h-full w-full bg-accent/60 animate-pulse" />
-            )}
-          </div>
-        )}
-      </Link>
-
-      <div className="flex flex-1 flex-col p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <Link href={`/video/${video.id}`} className="font-mono text-xs font-bold text-accent hover:underline">
-              {video.code}
-            </Link>
-          </div>
-          {video.actress && (
-            <Link
-              href={`/video/${video.id}`}
-              className="truncate text-xs font-semibold text-text-secondary hover:text-accent transition"
-            >
-              {video.actress}
-            </Link>
-          )}
-        </div>
-        <Link href={`/video/${video.id}`} className="block group/title mt-2">
-          <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-text-primary group-hover/title:text-accent transition duration-150 leading-relaxed">
-            {video.title_zh_tw || video.title}
-          </h3>
-        </Link>
-
-        <div className="mt-auto flex items-center justify-between border-t border-border-hairline pt-3">
-          {video.video_path && video.local_file_exists ? (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleOpen}
-                title="用電腦播放器開啟"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent/10 px-2.5 py-1.5 text-[11px] font-bold text-accent transition hover:bg-accent/20 cursor-pointer"
-              >
-                🖥 電腦播放
-              </button>
-              <a
-                href={safeExternalHref(video.url)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleOriginalSiteClick}
-                title="前往原始網站"
-                className="inline-flex items-center justify-center rounded-lg bg-surface-highest hover:bg-border-hairline px-2.5 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary transition cursor-pointer border border-border-hairline gap-1"
-              >
-                🌐 原始網站 ↗
-              </a>
-            </div>
-          ) : isDownloading ? (
-            <div className="flex items-center gap-1.5">
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-accent animate-pulse">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent animate-ping" />
-                {video.download_queued
-                  ? "排隊中..."
-                  : typeof video.download_progress === "number"
-                    ? `下載中 ${video.download_progress}%`
-                    : "正在下載中..."}
-              </span>
-              <button
-                onClick={handleCancelDownload}
-                title="取消下載"
-                className="text-[10px] font-bold text-red-400 hover:text-red-300 transition duration-150 cursor-pointer ml-1"
-              >
-                取消
-              </button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleDownload}
-                className="rounded-lg bg-surface-highest hover:bg-border-hairline px-2.5 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary transition cursor-pointer border border-border-hairline"
-              >
-                ↓ 下載影片
-              </button>
-              <a
-                href={safeExternalHref(video.url)}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleOriginalSiteClick}
-                title="前往原始網站"
-                className="inline-flex items-center justify-center rounded-lg bg-surface-highest hover:bg-border-hairline px-2.5 py-1.5 text-[11px] font-bold text-text-secondary hover:text-text-primary transition cursor-pointer border border-border-hairline gap-1"
-              >
-                🌐 原始網站 ↗
-              </a>
-            </div>
-          )}
-          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-text-tertiary font-mono">
-            ▶ {playCount}
-          </span>
-        </div>
-
-        {video.tags?.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1">
-            {[...video.tags].reverse().map((t) => {
-              const active = selectedTags.includes(t);
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => onTagClick(t)}
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold transition cursor-pointer border ${
-                    active
-                      ? "bg-accent text-neutral-950 border-accent font-bold"
-                      : "bg-surface-highest/40 text-text-secondary border-border-hairline hover:border-accent/20 hover:text-text-primary"
-                  }`}
-                >
-                  {t}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
 

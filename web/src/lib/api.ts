@@ -26,6 +26,14 @@ export interface VideoRecord {
   download_queued?: boolean;
   // Whole-percent download progress (0–100); null when queued or not downloading.
   download_progress?: number | null;
+  // Series membership. `series` is the name, joined in by the backend so a card
+  // can render its chip without loading the series list separately. All null on
+  // an unclassified video.
+  series?: string | null;
+  series_id?: number | null;
+  series_cover?: string | null;
+  series_has_cover?: boolean;
+  episode?: number | null;
 }
 
 async function parseError(res: Response): Promise<string> {
@@ -88,13 +96,35 @@ export function streamUrl(videoId: number): string {
 // lazily fetches + caches the origin bytes on first view. Falls back to the raw
 // origin URL only when there is no id to address it by, and null when there is
 // no cover at all.
+export function isDownloaded(video: { video_path?: string | null; local_file_exists?: boolean }): boolean {
+  return Boolean(video.video_path && video.local_file_exists);
+}
+
 export function coverUrl(video: VideoRecord): string | null {
   if (video.id != null && (video.has_cover || video.cover)) {
     const code = getAccessCode();
     const query = code ? `?token=${encodeURIComponent(code)}` : "";
     return backendUrl(`/api/stream/cover/${video.id}${query}`);
   }
-  return video.cover || null;
+  if (video.cover) return video.cover;
+
+  if (video.series_id != null && (video.series_has_cover || video.series_cover)) {
+    const code = getAccessCode();
+    const query = code ? `?token=${encodeURIComponent(code)}` : "";
+    return backendUrl(`/api/stream/series-cover/${video.series_id}${query}`);
+  }
+  if (video.series_cover) return video.series_cover;
+
+  return null;
+}
+
+export function seriesCoverUrl(series: { id: number; has_cover?: boolean; cover?: string | null }): string | null {
+  if (series.id != null && (series.has_cover || series.cover)) {
+    const code = getAccessCode();
+    const query = code ? `?token=${encodeURIComponent(code)}` : "";
+    return backendUrl(`/api/stream/series-cover/${series.id}${query}`);
+  }
+  return series.cover || null;
 }
 
 // Allow only http(s) URLs into an anchor href. A video's `url` is user/scrape
@@ -309,9 +339,12 @@ export async function fetchSupportedSites(): Promise<SupportedSite[]> {
 
 export interface AnalyzeStatusResponse {
   status: "analyzing" | "success" | "error" | "not_found";
-  // On success the backend returns only the new video id; the caller fetches
-  // the full record separately (see fetchVideo).
+  // On success the backend returns only ids; the caller fetches the full
+  // records separately (see fetchVideo). One URL can yield many: a listing page
+  // (an anime season's episodes) analyses into one record per episode.
   id?: number;
+  ids?: number[];
+  count?: number;
   error?: string;
 }
 
@@ -321,8 +354,9 @@ export async function checkAnalyzeStatus(taskId: string): Promise<AnalyzeStatusR
   return res.json();
 }
 
-// Start an analysis task and poll until it settles; resolves to the new video id.
-export async function analyzeUrl(url: string, download: boolean = false, taskId?: string): Promise<number> {
+// Start an analysis task and poll until it settles; resolves to the new video
+// ids — one for a video URL, one per episode for a listing URL.
+export async function analyzeUrl(url: string, download: boolean = false, taskId?: string): Promise<number[]> {
   const id = taskId || Date.now().toString() + Math.random().toString(36).substring(2, 9);
 
   const startRes = await backendFetch("/api/analyze", {
@@ -336,7 +370,7 @@ export async function analyzeUrl(url: string, download: boolean = false, taskId?
     await new Promise((resolve) => setTimeout(resolve, 1500));
     const statusRes = await checkAnalyzeStatus(id);
     if (statusRes.status === "success" && statusRes.id != null) {
-      return statusRes.id;
+      return statusRes.ids?.length ? statusRes.ids : [statusRes.id];
     } else if (statusRes.status === "error") {
       throw new Error(statusRes.error || "分析失敗");
     } else if (statusRes.status === "not_found") {
@@ -376,6 +410,9 @@ export interface ExportedVideo {
   actress?: string | null;
   tags: string[];
   cover?: string | null;
+  // Series travels by name, not id — ids are local to one database.
+  series?: string | null;
+  episode?: number | null;
 }
 
 // Reduce a full catalog record to the portable export shape (drops the local
@@ -390,7 +427,78 @@ export function toExportedVideo(v: VideoRecord): ExportedVideo {
     actress: v.actress ?? null,
     tags: v.tags ?? [],
     cover: v.cover ?? null,
+    series: v.series ?? null,
+    episode: v.episode ?? null,
   };
+}
+
+export interface SeriesRecord {
+  id: number;
+  name: string;
+  cover?: string | null;
+  has_cover?: boolean;
+  created_at?: string;
+  // How many videos are in it (0 for a series created but not yet filled).
+  count: number;
+}
+
+export async function fetchSeries(): Promise<SeriesRecord[]> {
+  const res = await backendFetch("/api/series", { cache: "no-store" });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = await res.json();
+  return (data.series ?? []) as SeriesRecord[];
+}
+
+// Create a series. The backend keys on the name, so creating an existing one
+// returns it rather than failing or duplicating it.
+export async function createSeries(name: string, cover?: string): Promise<SeriesRecord> {
+  const res = await backendFetch("/api/series", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, cover }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function updateSeries(
+  id: number,
+  data: { name?: string; cover?: string | null }
+): Promise<SeriesRecord> {
+  const res = await backendFetch(`/api/series/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+export async function renameSeries(id: number, name: string): Promise<SeriesRecord> {
+  return updateSeries(id, { name });
+}
+
+// Delete a series. Its videos survive — they just become unclassified.
+export async function deleteSeries(id: number): Promise<{ status: string }> {
+  const res = await backendFetch(`/api/series/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+// Assign videos to a series in one request. Deliberately not one call per video:
+// the backend numbers episodes from the series' current maximum, so parallel
+// single calls would race for the same number.
+export async function assignVideosToSeries(
+  seriesId: number,
+  videoIds: number[],
+): Promise<{ status: string; assigned: number }> {
+  const res = await backendFetch(`/api/series/${seriesId}/videos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ video_ids: videoIds }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
 }
 
 // Fetch the whole catalog as portable JSON (metadata only), e.g. to save a backup.
@@ -493,7 +601,12 @@ export async function updateVideoTags(
 // Update editable metadata (code/title/url/cover); returns the updated record.
 export async function updateVideoDetails(
   id: number,
-  details: { code?: string; title?: string; actress?: string; url?: string; cover?: string },
+  // series_id/episode are omitted unless the caller means to change them: the
+  // backend distinguishes "not sent" from an explicit null (leave the series).
+  details: {
+    code?: string; title?: string; actress?: string; url?: string; cover?: string;
+    series_id?: number | null; episode?: number | null;
+  },
 ): Promise<VideoRecord> {
   const res = await backendFetch(`/api/videos/${id}`, {
     method: "PUT",
