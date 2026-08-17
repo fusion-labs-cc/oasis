@@ -304,7 +304,7 @@ export default function Header() {
                   onClick={() => switchMode("av")}
                   className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
                     mode === "av"
-                      ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
+                      ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
                       : "text-text-tertiary hover:text-text-primary"
                   }`}
                 >
@@ -381,7 +381,7 @@ export default function Header() {
                     }}
                     className={`flex-1 text-center py-2 rounded-lg transition cursor-pointer ${
                       mode === "av"
-                        ? "bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30"
+                        ? "bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30"
                         : "text-text-tertiary hover:text-text-primary"
                     }`}
                   >

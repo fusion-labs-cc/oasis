@@ -83,11 +83,7 @@ export default function SupportedSites({
           target="_blank"
           rel="noopener noreferrer"
           title={`前往 ${s.domain}`}
-          className={`rounded-md border px-2 py-0.5 transition cursor-pointer ${
-            activeCategory === "general"
-              ? "border-emerald-500/20 bg-emerald-950/30 text-emerald-300 hover:border-emerald-500/50 hover:text-emerald-200"
-              : "border-purple-500/20 bg-purple-950/30 text-purple-300 hover:border-purple-500/50 hover:text-purple-200"
-          }`}
+          className="rounded-md border border-emerald-500/20 bg-emerald-950/30 px-2 py-0.5 text-emerald-300 transition cursor-pointer hover:border-emerald-500/50 hover:text-emerald-200"
         >
           {s.name}
         </a>

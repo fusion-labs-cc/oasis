@@ -162,11 +162,7 @@ export default function VideoCard({
           const siteName = getSiteName(video.url);
           return (
             <div
-              className={`absolute right-2 top-2 z-10 rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider shadow-sm backdrop-blur-md border ${
-                category === "general"
-                  ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/30"
-                  : "bg-purple-950/80 text-purple-300 border-purple-500/30"
-              }`}
+              className="absolute right-2 top-2 z-10 rounded-md border border-emerald-500/30 bg-emerald-950/80 px-1.5 py-0.5 text-[10px] font-mono font-bold tracking-wider text-emerald-300 shadow-sm backdrop-blur-md"
             >
               {siteName || (category === "general" ? "一般" : "AV")}
             </div>
