@@ -15,23 +15,10 @@ import SeriesEditModal from "@/components/SeriesEditModal";
 import SeriesCard from "@/components/SeriesCard";
 import VideoCard from "@/components/VideoCard";
 
-type DownloadFilter = "all" | "downloaded" | "not_downloaded";
-type SortKey = "added_desc" | "added_asc" | "plays_desc" | "plays_asc";
-
-const SORT_KEYS: SortKey[] = ["added_desc", "added_asc", "plays_desc", "plays_asc"];
-const DOWNLOAD_FILTERS: DownloadFilter[] = ["all", "downloaded", "not_downloaded"];
-const SORT_KEY_STORAGE = "oasis:sort_key";
-const DOWNLOAD_FILTER_STORAGE = "oasis:download_filter";
-const GROUP_SERIES_STORAGE = "oasis:group_series";
-
 // One tile in the grid: a single video, or a whole series collapsed into one.
 type GridItem =
   | { kind: "video"; key: string; video: VideoRecord }
   | { kind: "series"; key: string; id: number; name: string; episodes: VideoRecord[] };
-
-function isDownloaded(v: VideoRecord): boolean {
-  return Boolean(v.video_path && v.local_file_exists);
-}
 
 export function CatalogView() {
   // Full catalog lives in the shared VideoContext so it survives navigation.
@@ -46,11 +33,6 @@ export function CatalogView() {
   const [match, setMatch] = useState<"all" | "any">("all");
   // Keyword search, driven by the Header's search bar via custom event.
   const [searchKeyword, setSearchKeyword] = useState("");
-  const [downloadFilter, setDownloadFilter] = useState<DownloadFilter>("all");
-  const [sortKey, setSortKey] = useState<SortKey>("added_desc");
-  // Collapse each series into a single tile. On by default: a 12-episode season
-  // otherwise buries everything else under near-identical cards.
-  const [groupSeries, setGroupSeries] = useState(true);
   // Mobile-only collapsible for the filter panel — the sidebar is xl-only.
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -170,35 +152,6 @@ export function CatalogView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Restore the last-used sort/download-filter choice on mount, so a reload
-  // doesn't silently reset back to the defaults.
-  useEffect(() => {
-    const storedSort = localStorage.getItem(SORT_KEY_STORAGE);
-    if (storedSort && SORT_KEYS.includes(storedSort as SortKey)) {
-      setSortKey(storedSort as SortKey);
-    }
-    const storedFilter = localStorage.getItem(DOWNLOAD_FILTER_STORAGE);
-    if (storedFilter && DOWNLOAD_FILTERS.includes(storedFilter as DownloadFilter)) {
-      setDownloadFilter(storedFilter as DownloadFilter);
-    }
-    const storedGroup = localStorage.getItem(GROUP_SERIES_STORAGE);
-    if (storedGroup !== null) {
-      setGroupSeries(storedGroup === "1");
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(SORT_KEY_STORAGE, sortKey);
-  }, [sortKey]);
-
-  useEffect(() => {
-    localStorage.setItem(DOWNLOAD_FILTER_STORAGE, downloadFilter);
-  }, [downloadFilter]);
-
-  useEffect(() => {
-    localStorage.setItem(GROUP_SERIES_STORAGE, groupSeries ? "1" : "0");
-  }, [groupSeries]);
-
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const generalCount = useMemo(
@@ -216,28 +169,20 @@ export function CatalogView() {
   );
 
   const facets = useMemo(() => computeFacets(categoryVideos), [categoryVideos]);
-  const hasSeries = useMemo(() => allVideos.some((v) => v.series_id != null), [allVideos]);
 
   // One sort key per series, so its members sort as a single block wherever the
   // series as a whole belongs.
   const seriesRank = useMemo(() => {
-    const rank = new Map<
-      number,
-      { addedMin: number; addedMax: number; playsMin: number; playsMax: number; minId: number }
-    >();
+    const rank = new Map<number, { addedMax: number; minId: number }>();
     for (const v of allVideos) {
       if (v.series_id == null) continue;
       const t = new Date(v.created_at ?? 0).getTime();
-      const p = v.play_count ?? 0;
       const id = v.id ?? 0;
       const cur = rank.get(v.series_id);
       if (!cur) {
-        rank.set(v.series_id, { addedMin: t, addedMax: t, playsMin: p, playsMax: p, minId: id });
+        rank.set(v.series_id, { addedMax: t, minId: id });
       } else {
-        cur.addedMin = Math.min(cur.addedMin, t);
         cur.addedMax = Math.max(cur.addedMax, t);
-        cur.playsMin = Math.min(cur.playsMin, p);
-        cur.playsMax = Math.max(cur.playsMax, p);
         cur.minId = Math.min(cur.minId, id);
       }
     }
@@ -257,8 +202,6 @@ export function CatalogView() {
             : selectedTags.every((t) => tags.has(t));
         if (!ok) return false;
       }
-      if (downloadFilter === "downloaded" && !isDownloaded(v)) return false;
-      if (downloadFilter === "not_downloaded" && isDownloaded(v)) return false;
       // Keyword search: match against code, title (both languages), actress, tags.
       if (kw) {
         const haystack = [
@@ -276,36 +219,26 @@ export function CatalogView() {
       return true;
     });
 
-    const descending = sortKey === "added_desc" || sortKey === "plays_desc";
+    // Always newest first. A series sorts as one block, on its newest member.
     const blockKey = (v: VideoRecord) => {
       const r = v.series_id != null ? seriesRank.get(v.series_id) : undefined;
-      switch (sortKey) {
-        case "added_asc":
-          return r ? r.addedMin : new Date(v.created_at ?? 0).getTime();
-        case "plays_desc":
-          return r ? r.playsMax : v.play_count ?? 0;
-        case "plays_asc":
-          return r ? r.playsMin : v.play_count ?? 0;
-        default:
-          return r ? r.addedMax : new Date(v.created_at ?? 0).getTime();
-      }
+      return r ? r.addedMax : new Date(v.created_at ?? 0).getTime();
     };
     const blockId = (v: VideoRecord) =>
       (v.series_id != null ? seriesRank.get(v.series_id)?.minId : undefined) ?? v.id ?? 0;
 
-    const dir = descending ? -1 : 1;
     const sorted = [...filtered].sort((a, b) => {
       const byKey = blockKey(a) - blockKey(b);
-      if (byKey) return dir * byKey;
+      if (byKey) return -byKey;
       const byBlock = blockId(a) - blockId(b);
-      if (byBlock) return dir * byBlock;
+      if (byBlock) return -byBlock;
       if (a.series_id != null && a.series_id === b.series_id) {
         return (a.episode ?? 0) - (b.episode ?? 0) || (a.id ?? 0) - (b.id ?? 0);
       }
-      return dir * ((a.id ?? 0) - (b.id ?? 0));
+      return -((a.id ?? 0) - (b.id ?? 0));
     });
     return sorted;
-  }, [allVideos, categoryFilter, selectedActress, selectedTags, match, searchKeyword, downloadFilter, sortKey, seriesRank]);
+  }, [allVideos, categoryFilter, selectedActress, selectedTags, match, searchKeyword, seriesRank]);
 
   function toggleTag(tag: string) {
     setSelectedTags((prev) =>
@@ -345,14 +278,12 @@ export function CatalogView() {
     setSelectedActress(null);
     setSelectedTags([]);
     setSearchKeyword("");
-    setDownloadFilter("all");
   }
 
   const hasFilters =
     selectedActress !== null ||
     selectedTags.length > 0 ||
-    searchKeyword.trim().length > 0 ||
-    downloadFilter !== "all";
+    searchKeyword.trim().length > 0;
 
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -412,7 +343,9 @@ export function CatalogView() {
 
   const gridItems = useMemo<GridItem[]>(() => {
     const keyOf = (v: VideoRecord) => String(v.id ?? v.code);
-    if (!groupSeries || selectMode) {
+    // Series always collapse into one tile — except in select mode, where the
+    // user has to be able to reach the individual episodes.
+    if (selectMode) {
       return videos.map((v) => ({ kind: "video", key: keyOf(v), video: v }));
     }
 
@@ -437,7 +370,7 @@ export function CatalogView() {
       i = j;
     }
     return items;
-  }, [videos, groupSeries, selectMode]);
+  }, [videos, selectMode]);
 
   const selectionInDisplayOrder = useMemo(() => {
     const visible = videos.filter((v) => v.id != null && selectedIds.has(v.id));
@@ -666,9 +599,9 @@ export function CatalogView() {
                   }`}
                 >
                   篩選
-                  {selectedTags.length + (selectedActress ? 1 : 0) + (downloadFilter !== "all" ? 1 : 0) > 0 && (
+                  {selectedTags.length + (selectedActress ? 1 : 0) > 0 && (
                     <span className="ml-1 font-mono font-bold">
-                      {selectedTags.length + (selectedActress ? 1 : 0) + (downloadFilter !== "all" ? 1 : 0)}
+                      {selectedTags.length + (selectedActress ? 1 : 0)}
                     </span>
                   )}
                 </button>
@@ -736,13 +669,6 @@ export function CatalogView() {
                 toggleTag={toggleTag}
                 match={match}
                 setMatch={setMatch}
-                downloadFilter={downloadFilter}
-                setDownloadFilter={setDownloadFilter}
-                sortKey={sortKey}
-                setSortKey={setSortKey}
-                groupSeries={groupSeries}
-                setGroupSeries={setGroupSeries}
-                hasSeries={hasSeries}
               />
             </div>
           )}
@@ -915,13 +841,6 @@ export function CatalogView() {
             toggleTag={toggleTag}
             match={match}
             setMatch={setMatch}
-            downloadFilter={downloadFilter}
-            setDownloadFilter={setDownloadFilter}
-            sortKey={sortKey}
-            setSortKey={setSortKey}
-            groupSeries={groupSeries}
-            setGroupSeries={setGroupSeries}
-            hasSeries={hasSeries}
           />
         </div>
       </aside>
@@ -975,13 +894,6 @@ function FilterPanel({
   toggleTag,
   match,
   setMatch,
-  downloadFilter,
-  setDownloadFilter,
-  sortKey,
-  setSortKey,
-  groupSeries,
-  setGroupSeries,
-  hasSeries,
 }: {
   facets: Facets;
   selectedActress: string | null;
@@ -990,84 +902,9 @@ function FilterPanel({
   toggleTag: (tag: string) => void;
   match: "all" | "any";
   setMatch: (m: "all" | "any") => void;
-  downloadFilter: DownloadFilter;
-  setDownloadFilter: (f: DownloadFilter) => void;
-  sortKey: SortKey;
-  setSortKey: (s: SortKey) => void;
-  groupSeries: boolean;
-  setGroupSeries: (g: boolean) => void;
-  hasSeries: boolean;
 }) {
   return (
     <>
-      <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
-        <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
-          排序方式
-        </span>
-        <select
-          value={sortKey}
-          onChange={(e) => setSortKey(e.target.value as SortKey)}
-          className="w-full rounded-lg border border-border-hairline bg-surface-elevated px-2.5 py-1.5 text-xs font-semibold text-text-secondary focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30 transition cursor-pointer"
-        >
-          <option value="added_desc">最新加入</option>
-          <option value="added_asc">最舊加入</option>
-          <option value="plays_desc">播放次數：高到低</option>
-          <option value="plays_asc">播放次數：低到高</option>
-        </select>
-      </div>
-
-      {hasSeries && (
-        <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
-          <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
-            系列顯示
-          </span>
-          <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
-            {([[true, "合併為系列"], [false, "顯示每一集"]] as const).map(([key, label]) => (
-              <button
-                key={String(key)}
-                type="button"
-                onClick={() => setGroupSeries(key)}
-                className={`px-2 py-1.5 flex-1 text-center font-medium transition cursor-pointer ${
-                  groupSeries === key
-                    ? "bg-accent text-neutral-950 font-bold"
-                    : "text-text-secondary hover:bg-surface-highest"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
-        <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
-          下載狀態
-        </span>
-        <div className="flex overflow-hidden rounded-lg border border-border-hairline text-[11px] bg-surface-elevated">
-          {(
-            [
-              ["all", "全部"],
-              ["downloaded", "已下載"],
-              ["not_downloaded", "未下載"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setDownloadFilter(key)}
-              className={`px-2 py-1.5 flex-1 text-center font-medium transition cursor-pointer ${
-                downloadFilter === key
-                  ? "bg-accent text-neutral-950 font-bold"
-                  : "text-text-secondary hover:bg-surface-highest"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {facets.actresses.length > 0 && (
         <div className="rounded-xl border border-border-hairline bg-surface-elevated/40 p-4">
           <span className="mb-3 block text-xs font-bold uppercase tracking-wider text-text-tertiary font-sans">
