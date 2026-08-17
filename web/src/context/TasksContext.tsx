@@ -24,6 +24,7 @@ export interface AnalysisTask {
   actress?: string;
   download: boolean;
   videoId?: number;
+  seriesId?: number;
   // Whole-percent download progress (0–100) while status === "downloading".
   progress?: number;
   // True while the download is waiting its turn in the backend's serial queue.
@@ -42,6 +43,8 @@ interface TasksContextType {
   addDownloadTask: (video: VideoRecord) => void;
   // Flag the download task for this video as canceled (from a card / detail page).
   markDownloadCanceled: (videoId: number) => void;
+  // Flag all download tasks for a series as canceled.
+  markSeriesDownloadsCanceled: (seriesId: number) => void;
 }
 
 const TasksContext = createContext<TasksContextType | undefined>(undefined);
@@ -95,6 +98,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
                   title: record?.title_zh_tw || record?.title,
                   actress: record?.actress || undefined,
                   videoId: ids[0],
+                  seriesId: record?.series_id ?? undefined,
                 }
               : t
           );
@@ -104,11 +108,13 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
         // gets its own, so the per-video progress and cancel machinery that
         // already exists works on them unchanged.
         const first = records[0];
+        const sId = first?.series_id ?? undefined;
         const summary: AnalysisTask = {
           ...task,
           status: "success",
           episodeCount: records.length,
           title: first?.title_zh_tw || first?.title,
+          seriesId: sId,
           videoId: undefined,
           progress: undefined,
           queued: undefined,
@@ -129,6 +135,7 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
                       actress: record.actress || undefined,
                       download: true,
                       videoId: record.id,
+                      seriesId: record.series_id ?? undefined,
                     },
                   ]
             )
@@ -276,13 +283,31 @@ export function TasksProvider({ children }: { children: React.ReactNode }) {
     );
   }, []);
 
+  const markSeriesDownloadsCanceled = useCallback((seriesId: number) => {
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.seriesId === seriesId && (t.status === "downloading" || t.status === "analyzing" || t.status === "canceling")
+          ? { ...t, status: "error", error: "下載已取消" }
+          : t
+      )
+    );
+  }, []);
+
   return (
     <TasksContext.Provider
-      value={{ tasks, setTasks, applyAnalysisResult, addDownloadTask, markDownloadCanceled }}
+      value={{
+        tasks,
+        setTasks,
+        applyAnalysisResult,
+        addDownloadTask,
+        markDownloadCanceled,
+        markSeriesDownloadsCanceled,
+      }}
     >
       {children}
     </TasksContext.Provider>
   );
+
 }
 
 export function useTasks() {

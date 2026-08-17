@@ -6,13 +6,14 @@ import { useEffect, useRef, useState } from "react";
 import { useVideos } from "@/context/VideoContext";
 import { useTasks, AnalysisTask } from "@/context/TasksContext";
 import { useToast } from "@/components/Toast";
-import { analyzeUrl, cancelAnalyze, cancelDownload, createVideo } from "@/lib/api";
+import { analyzeUrl, cancelAnalyze, cancelDownload, cancelSeriesDownloads, createVideo } from "@/lib/api";
 import SupportedSites from "./SupportedSites";
 
 interface AddVideoModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
 
 // Same code shape the backend extracts: 2–10 uppercase letters, hyphen, digits.
 // \b lets it match inside brackets too, e.g. "[START-344]".
@@ -74,7 +75,8 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
   const toast = useToast();
   // The progress list ("解析進度") is shared state so downloads started from
   // cards / the detail page also land here.
-  const { tasks, setTasks, applyAnalysisResult } = useTasks();
+  const { tasks, setTasks, applyAnalysisResult, markSeriesDownloadsCanceled } = useTasks();
+
   const [mode, setMode] = useState<Mode>("auto");
   const [url, setUrl] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -285,6 +287,17 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
     }
   };
+
+  const handleCancelSeriesDownloads = async (seriesId: number) => {
+    try {
+      const res = await cancelSeriesDownloads(seriesId);
+      markSeriesDownloadsCanceled(seriesId);
+      toast(`已停止系列下載（已取消 ${res.cancelled_count} 部影片）`, { type: "success" });
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : String(err));
+    }
+  };
+
 
   const handleClearTask = (taskId: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
@@ -591,6 +604,16 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                             ? "下載完成"
                             : "解析成功"}
                       </span>
+                      {typeof task.seriesId === "number" && tasks.some((t) => t.seriesId === task.seriesId && t.status === "downloading") && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelSeriesDownloads(task.seriesId!)}
+                          title="一鍵停止整個系列下載"
+                          className="text-[11px] font-bold text-red-400 hover:text-red-300 transition duration-150 cursor-pointer rounded border border-red-500/30 bg-red-500/10 px-2 py-0.5"
+                        >
+                          ⏹ 停止系列下載
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleClearTask(task.id)}
@@ -599,6 +622,7 @@ export default function AddVideoModal({ isOpen, onClose }: AddVideoModalProps) {
                       >
                         清除
                       </button>
+
                     </div>
                   )}
                   {task.status === "error" && (

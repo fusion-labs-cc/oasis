@@ -488,6 +488,17 @@ def get_series_by_id(series_id: int):
     return dict(row) if row else None
 
 
+def get_videos_by_series_id(series_id: int) -> list[dict]:
+    conn = get_connection()
+    rows = conn.execute(
+        f"{_VIDEO_SELECT} WHERE v.series_id = ? ORDER BY v.episode ASC, v.id ASC",
+        (series_id,)
+    ).fetchall()
+    conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+
 def create_series(name: str, cover: str | None = None) -> dict:
     """Create a series, or return the existing one with that name.
 
@@ -853,6 +864,21 @@ def fetch_page_metadata(url: str) -> tuple:
 
     adapter = detect_site(url)
 
+    if adapter.get('id') == 'youtube':
+        try:
+            import yt_dlp
+            ydl_opts = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info:
+                    v_title = info.get('title') or ''
+                    v_id = info.get('id')
+                    c_url = info.get('thumbnail') or (f'https://i.ytimg.com/vi/{v_id}/hqdefault.jpg' if v_id else None)
+                    r_tags = info.get('tags') or []
+                    return v_title, r_tags, c_url, None
+        except Exception as e:
+            print(f'⚠️ yt-dlp 取得 YouTube 資訊失敗，退回 Selenium: {e}')
+
     dr = _start_scrape_driver(adapter)
     _active_driver = dr
     try:
@@ -908,8 +934,18 @@ def process_url(url: str, skip_download: bool = False):
 
     # Step 2: Extract metadata. The page's own cast label, when the adapter
     # scrapes one, beats guessing the name off the title's tail.
-    code = extract_code(full_title)
-    actress = page_actress or extract_actress(full_title, code)
+    from site_config import detect_site, derive_code
+    adapter = detect_site(url)
+
+    if adapter.get('id') == 'youtube':
+        actress = None
+        code = next_youtube_code()
+    else:
+        code = derive_code(url, adapter, full_title) or extract_code(full_title)
+        actress = page_actress or extract_actress(full_title, code)
+
+
+
     title = extract_title(full_title, code, actress)
     tags = translate_tags_to_zh_tw(extract_tags(raw_tags, code))
 
@@ -980,6 +1016,39 @@ def _fetch_listing_entries(url: str) -> tuple[dict, list[dict], str | None]:
     )
 
     adapter = detect_site(url)
+
+    if adapter.get('id') == 'youtube':
+        try:
+            import yt_dlp
+            ydl_opts = {'extract_flat': 'in_playlist', 'quiet': True, 'no_warnings': True}
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info and info.get('entries'):
+                    series_name = info.get('title')
+                    entries = []
+                    for e in info.get('entries', []):
+                        v_id = e.get('id')
+                        v_url = e.get('url') or e.get('webpage_url')
+                        if not v_url and v_id:
+                            v_url = f'https://www.youtube.com/watch?v={v_id}'
+                        if not v_url:
+                            continue
+                        v_title = e.get('title') or ''
+                        thumbs = e.get('thumbnails') or []
+                        thumb = thumbs[-1].get('url') if thumbs else (f'https://i.ytimg.com/vi/{v_id}/hqdefault.jpg' if v_id else None)
+                        uploader = e.get('uploader') or e.get('channel')
+                        entries.append({
+                            'url': v_url,
+                            'title': v_title,
+                            'tags': [],
+                            'cover': thumb,
+                            'actress': None,
+                        })
+                    if entries:
+                        return adapter, entries, series_name
+        except Exception as e:
+            print(f'⚠️ yt-dlp 解析 YouTube 列表失敗，退回 Selenium: {e}')
+
     max_pages = listing_max_pages(adapter)
 
     dr = _start_scrape_driver(adapter)
@@ -1053,19 +1122,24 @@ def process_listing_url(url: str) -> list[dict]:
             print(f'⚠️  建立系列失敗（{series_name}）: {e}')
 
     records = []
-    # Listings run newest-first; insert oldest-first so ascending ids and
-    # episode numbers both match the real episode order.
-    for episode_no, entry in enumerate(reversed(entries), start=1):
+    # Listings default to newest-first unless the adapter specifies order: "asc".
+    listing_cfg = adapter.get('listing') or {}
+    ordered_entries = entries if listing_cfg.get('order') == 'asc' else list(reversed(entries))
+
+    for episode_no, entry in enumerate(ordered_entries, start=1):
         full_title = (entry.get('title') or '').strip()
         if not full_title:
             print(f'⚠️  略過沒有標題的項目: {entry["url"]}')
             continue
 
-        # A derived code is what keeps a season's episodes apart: the studio-code
-        # heuristic never matches these titles, and its 20-character fallback is
-        # identical across every episode of a long-named series.
-        code = derive_code(entry['url'], adapter, full_title) \
-            or extract_code(full_title) or full_title[:20]
+        if adapter.get('id') == 'youtube':
+            code = next_youtube_code()
+            actress = None
+        else:
+            code = derive_code(entry['url'], adapter, full_title) \
+                or extract_code(full_title) or full_title[:20]
+            actress = entry.get('actress')
+
         tags = translate_tags_to_zh_tw(extract_tags(entry.get('tags') or [], None))
         title_zh_tw = full_title if is_zh_tw(full_title) else translate_to_zh_tw(full_title)
 
@@ -1074,9 +1148,9 @@ def process_listing_url(url: str) -> list[dict]:
             'url': entry['url'],
             'title': full_title,
             'title_zh_tw': title_zh_tw,
-            'actress': None,
+            'actress': actress,
             'tags': tags,
-            'cover': None,
+            'cover': entry.get('cover'),
             'video_path': find_local_file(code, full_title),
             'series_id': series_id,
             'episode': episode_no if series_id else None,
@@ -1089,10 +1163,24 @@ def process_listing_url(url: str) -> list[dict]:
         print(f'   ✅ {code}  {full_title}')
         records.append(record)
 
+
     if not records:
         raise ValueError('列表頁的項目都無法解析')
     print(f'\n💾 已寫入 {len(records)} 筆記錄')
     return records
+
+
+def next_youtube_code() -> str:
+    """Next sequential code for YouTube entries: YT-1, YT-2, YT-3, etc."""
+    conn = get_connection()
+    rows = conn.execute("SELECT code FROM videos WHERE code LIKE 'YT-%'").fetchall()
+    conn.close()
+    max_n = 0
+    for row in rows:
+        m = re.match(r'^YT-(\d+)$', row['code'])
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return f'YT-{max_n + 1}'
 
 
 def next_manual_code() -> str:
@@ -1111,6 +1199,7 @@ def next_manual_code() -> str:
         if m:
             max_n = max(max_n, int(m.group(1)))
     return f'MANUAL-{max_n + 1}'
+
 
 
 def create_manual_video(url, title, code=None, actress=None, tags=None, cover=None):

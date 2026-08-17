@@ -918,7 +918,31 @@ def cancel_download(video_id: int):
     return {"status": "cancelled", "message": "下載已取消"}
 
 
+@app.post('/api/series/{series_id}/cancel-downloads')
+def cancel_series_downloads(series_id: int):
+    """Cancel all ongoing and queued downloads for videos in a series."""
+    videos = catalog.get_videos_by_series_id(series_id)
+    cancelled_count = 0
+    for v in videos:
+        vid = v.get('id')
+        if not vid:
+            continue
+        if _is_queued(vid) or vid in active_downloads or v.get('download_pending'):
+            try:
+                cancel_download(vid)
+                cancelled_count += 1
+            except Exception as e:
+                print(f"⚠️ 取消影片 {vid} 下載失敗: {e}")
+
+    return {
+        "status": "cancelled",
+        "cancelled_count": cancelled_count,
+        "message": f"已取消系列下載（共 {cancelled_count} 部影片）"
+    }
+
+
 @app.post('/api/download/{video_id}')
+
 def trigger_download(video_id: int):
     """Trigger a background download for an existing video."""
     record = catalog.get_video_by_id(video_id)

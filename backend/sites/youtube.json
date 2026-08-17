@@ -1,0 +1,43 @@
+{
+  "id": "youtube",
+  "name": "YouTube",
+  "display_domain": "youtube.com",
+  "domains": [
+    "youtube.com",
+    "youtu.be"
+  ],
+  "domain_prefixes": [],
+  "user_agent": "",
+  "title_selectors": [
+    "h1.ytd-watch-metadata",
+    "h1.ytd-video-primary-info-renderer",
+    "title"
+  ],
+  "title_suffix_strip": [
+    " - YouTube"
+  ],
+  "tag_selectors": [
+    "a[href*='/hashtag/']"
+  ],
+  "actress_selectors": [],
+  "cover": {
+    "selectors": [
+      {"css": "meta[property='og:image']", "attr": "content"}
+    ]
+  },
+  "headers": {
+    "Referer": "{page_url}"
+  },
+  "listing": {
+    "url_patterns": [
+      "[?&]list=",
+      "/playlist"
+    ],
+    "item_selector": "ytd-playlist-panel-video-renderer, ytd-playlist-video-renderer",
+    "link": {"css": "a#wc-endpoint, a#thumbnail", "attr": "href"},
+    "title": {"css": "span#video-title, #video-title"},
+    "series_name": {"css": "h1#title, yt-formatted-string.ytd-playlist-header-renderer"},
+    "order": "asc",
+    "max_pages": 1
+  }
+}

@@ -11,3 +11,5 @@ idna==3.6
 deep-translator==1.11.4
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+yt-dlp
+

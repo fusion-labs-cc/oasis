@@ -543,6 +543,13 @@ export async function cancelDownload(id: number): Promise<{ status: string, mess
   return res.json();
 }
 
+export async function cancelSeriesDownloads(seriesId: number): Promise<{ status: string; cancelled_count: number; message: string }> {
+  const res = await backendFetch(`/api/series/${seriesId}/cancel-downloads`, { method: "POST" });
+  if (!res.ok) throw new Error(await parseError(res));
+  return res.json();
+}
+
+
 export interface DownloadStatusResponse {
   status: "downloading" | "queued" | "completed" | "idle";
   // Whole-percent download progress (0–100); null until the backend reports it

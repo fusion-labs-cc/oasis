@@ -48,16 +48,22 @@ def download(url, progress_cb=None):
 
   # 依 URL 選出對應的站台 adapter（使用者自備，見 backend/sites.example.json）
   adapter = detect_site(url)
-  # 'hls'（m3u8 + ts 片段，預設）或 'http'（單一漸進式檔案）
-  mode = media_mode(adapter)
-  print(f'偵測到站台: {adapter.get("name", adapter.get("id"))}')
-  print('正在下載影片: ' + url)
 
   # 建立影片資料夾（movies/ 位於 repo root，即 backend 的上一層）
   media_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
   movies_folder = os.path.join(media_root, 'movies')
   if not os.path.exists(movies_folder):
       os.makedirs(movies_folder)
+
+  if adapter.get('id') == 'youtube':
+      _download_youtube(url, adapter, movies_folder, _report)
+      return
+
+  # 'hls'（m3u8 + ts 片段，預設）或 'http'（單一漸進式檔案）
+  mode = media_mode(adapter)
+  print(f'偵測到站台: {adapter.get("name", adapter.get("id"))}')
+  print('正在下載影片: ' + url)
+
 
   #配置Selenium參數
   options = Options()
@@ -196,3 +202,82 @@ def download(url, progress_cb=None):
   os.rmdir(folderPath)
   _report(100)
   print(f'✅ 影片已移至: {dst}')
+
+
+def _download_youtube(url, adapter, movies_folder, _report):
+    import shutil
+    import yt_dlp
+    from site_config import _clean_filename
+
+    _report(1)
+    print('偵測到站台: YouTube')
+    print('正在下載影片: ' + url)
+
+    # 1. Extract metadata to get video title
+    ydl_opts_info = {'quiet': True, 'no_warnings': True, 'noplaylist': True}
+    with yt_dlp.YoutubeDL(ydl_opts_info) as ydl:
+        info = ydl.extract_info(url, download=False)
+        title = info.get('title') if info else None
+
+    video_name = _clean_filename(title or 'youtube_video')
+    print(f'影片名稱: {video_name}')
+
+    if os.path.exists(os.path.join(movies_folder, f'{video_name}.mp4')):
+        print('影片已存在, 跳過...')
+        _report(100)
+        return
+
+    dir_path = os.path.join(movies_folder, video_name)
+    os.makedirs(dir_path, exist_ok=True)
+
+    _report(3)
+
+    def ytdl_hook(d):
+        if d['status'] == 'downloading':
+            total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
+            downloaded = d.get('downloaded_bytes', 0)
+            if total > 0:
+                _report(3 + (downloaded / total) * 92)
+        elif d['status'] == 'finished':
+            _report(96)
+
+    outtmpl = os.path.join(dir_path, f'{video_name}.%(ext)s')
+
+    # Put bundled ffmpeg on PATH if present
+    ffmpeg_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'bin'))
+    if os.path.isdir(ffmpeg_dir):
+        os.environ['PATH'] = ffmpeg_dir + os.path.pathsep + os.environ.get('PATH', '')
+
+    ydl_opts_dl = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': outtmpl,
+        'merge_output_format': 'mp4',
+        'progress_hooks': [ytdl_hook],
+        'noplaylist': True,
+        'quiet': True,
+        'no_warnings': True,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts_dl) as ydl:
+        ydl.download([url])
+
+    _report(98)
+
+    mp4_file = os.path.join(dir_path, f'{video_name}.mp4')
+    if not os.path.exists(mp4_file):
+        candidates = [f for f in os.listdir(dir_path) if f.lower().endswith('.mp4')]
+        if candidates:
+            mp4_file = os.path.join(dir_path, candidates[0])
+        else:
+            raise FileNotFoundError(f'下載完成但找不到 MP4 檔案 ({video_name})')
+
+    dst = os.path.join(movies_folder, f'{video_name}.mp4')
+    os.rename(mp4_file, dst)
+    try:
+        shutil.rmtree(dir_path)
+    except Exception:
+        pass
+
+    _report(100)
+    print(f'✅ 影片已移至: {dst}')
+

@@ -11,6 +11,7 @@ import {
   coverUrl,
   isDownloaded,
   downloadVideo,
+  cancelSeriesDownloads,
   deleteSeries,
   type SeriesRecord,
   type VideoRecord,
@@ -38,6 +39,7 @@ export default function SeriesDetailPage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [cancelingAll, setCancelingAll] = useState(false);
 
   // Load series list on mount
   const loadSeriesData = async () => {
@@ -99,7 +101,8 @@ export default function SeriesDetailPage() {
 
   // Download stats
   const downloadedCount = useMemo(() => episodes.filter(isDownloaded).length, [episodes]);
-  const activeCount = useMemo(() => episodes.filter((e) => e.is_downloading).length, [episodes]);
+  const activeCount = useMemo(() => episodes.filter((e) => e.is_downloading || e.download_queued).length, [episodes]);
+
   const overallProgress = useMemo(() => {
     if (episodes.length === 0) return 0;
     const sum = episodes.reduce(
@@ -133,6 +136,21 @@ export default function SeriesDetailPage() {
       toast(`已開始在背景下載 ${count} 部影片`, { type: "success" });
     } else {
       toast("下載觸發失敗，請稍後重試", { type: "error" });
+    }
+  }
+
+  // One-click cancel all downloading/queued videos in series
+  async function handleCancelAll() {
+    if (!numId || cancelingAll) return;
+    setCancelingAll(true);
+    try {
+      const res = await cancelSeriesDownloads(numId);
+      toast(`已停止系列下載（已取消 ${res.cancelled_count} 部影片）`, { type: "success" });
+      refresh();
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), { type: "error" });
+    } finally {
+      setCancelingAll(false);
     }
   }
 
@@ -258,6 +276,17 @@ export default function SeriesDetailPage() {
 
           {/* Action Buttons */}
           <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
+            {activeCount > 0 && (
+              <button
+                type="button"
+                onClick={handleCancelAll}
+                disabled={cancelingAll}
+                className="rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 px-4 py-2.5 text-xs font-bold transition cursor-pointer disabled:opacity-50 flex items-center gap-1.5 shadow-[0_4px_20px_rgba(239,68,68,0.15)]"
+              >
+                ⏹ {cancelingAll ? "停止中…" : "一鍵停止整個系列下載"}
+              </button>
+            )}
+
             {downloadedCount < episodes.length && (
               <button
                 type="button"
@@ -286,6 +315,7 @@ export default function SeriesDetailPage() {
             </button>
           </div>
         </div>
+
 
         {/* Global progress bar for series */}
         {activeCount > 0 && (
