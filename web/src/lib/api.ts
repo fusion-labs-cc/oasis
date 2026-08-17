@@ -478,9 +478,12 @@ export async function renameSeries(id: number, name: string): Promise<SeriesReco
   return updateSeries(id, { name });
 }
 
-// Delete a series. Its videos survive — they just become unclassified.
-export async function deleteSeries(id: number): Promise<{ status: string }> {
-  const res = await backendFetch(`/api/series/${id}`, { method: "DELETE" });
+// Delete a series. If deleteVideos is true, also deletes all related videos and their files.
+export async function deleteSeries(id: number, deleteVideos: boolean = false): Promise<{ status: string }> {
+  const url = deleteVideos
+    ? `/api/series/${id}?delete_videos=true`
+    : `/api/series/${id}`;
+  const res = await backendFetch(url, { method: "DELETE" });
   if (!res.ok) throw new Error(await parseError(res));
   return res.json();
 }

@@ -1181,11 +1181,34 @@ def put_series(series_id: int, body: SeriesUpdate):
 
 
 @app.delete('/api/series/{series_id}')
-def remove_series(series_id: int):
-    """Delete a series. Its videos are kept and become unclassified."""
+def remove_series(series_id: int, delete_videos: bool = False):
+    """Delete a series.
+    If delete_videos is False (default), its videos are kept and become unclassified.
+    If delete_videos is True, also delete all related videos and their local files.
+    """
+    series_rec = catalog.get_series_by_id(series_id)
+    if not series_rec:
+        raise HTTPException(status_code=404, detail='系列不存在')
+
+    if delete_videos:
+        videos = catalog.get_videos_by_series_id(series_id)
+        for v in videos:
+            if _is_downloading(v['id']):
+                raise HTTPException(status_code=409, detail=f"系列中的影片「{v.get('title')}」正在下載中，請待完成後再刪除")
+        for v in videos:
+            rel_path = v.get('video_path')
+            if rel_path:
+                abs_path = os.path.abspath(os.path.join(MEDIA_ROOT, rel_path))
+                if abs_path.startswith(MEDIA_ROOT + os.sep) and os.path.isfile(abs_path):
+                    try:
+                        os.remove(abs_path)
+                    except OSError as e:
+                        print(f"Failed to remove video file {abs_path}: {e}")
+            catalog.delete_video(v['id'])
+
     if not catalog.delete_series(series_id):
         raise HTTPException(status_code=404, detail='系列不存在')
-    return {'status': 'deleted'}
+    return {'status': 'deleted', 'deleted_videos': delete_videos}
 
 
 @app.post('/api/series/{series_id}/videos')

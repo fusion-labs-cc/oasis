@@ -155,12 +155,15 @@ export default function SeriesDetailPage() {
   }
 
   // Delete series record
-  async function handleDeleteSeries() {
+  async function handleDeleteSeries(deleteVideos: boolean = false) {
     if (!series || deleting) return;
     setDeleting(true);
     try {
-      await deleteSeries(series.id);
-      toast("已刪除系列（影片仍保留為未分類）", { type: "success" });
+      await deleteSeries(series.id, deleteVideos);
+      toast(
+        deleteVideos ? "已刪除系列及所有相關影片" : "已刪除系列（影片仍保留為未分類）",
+        { type: "success" }
+      );
       router.push("/");
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err), { type: "error" });
@@ -340,24 +343,32 @@ export default function SeriesDetailPage() {
           <div className="w-full max-w-md rounded-2xl border border-border-hairline bg-surface-elevated p-6 shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-text-primary">確定要刪除系列「{seriesName}」？</h3>
             <p className="text-xs text-text-tertiary leading-relaxed font-sans">
-              刪除系列僅會移除該系列分類與封面設定，此系列下的所有影片將保留並轉為「未分類」，不會刪除任何本地影片檔案。
+              請選擇刪除方式：您可以僅刪除系列分類（保留影片並轉為未分類），或是連同此系列下的所有影片及本地檔案一併刪除。
             </p>
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(false)}
                 disabled={deleting}
-                className="rounded-xl border border-border-hairline bg-surface-highest px-4 py-2 text-xs font-semibold text-text-secondary hover:text-text-primary transition cursor-pointer"
+                className="rounded-xl border border-border-hairline bg-surface-highest px-3.5 py-2 text-xs font-semibold text-text-secondary hover:text-text-primary transition cursor-pointer"
               >
                 取消
               </button>
               <button
                 type="button"
-                onClick={handleDeleteSeries}
+                onClick={() => handleDeleteSeries(false)}
                 disabled={deleting}
-                className="rounded-xl bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 px-4 py-2 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                className="rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 px-3.5 py-2 text-xs font-bold transition cursor-pointer disabled:opacity-50"
               >
-                {deleting ? "刪除中…" : "確定刪除"}
+                {deleting ? "刪除中…" : "僅刪除系列 (保留影片)"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteSeries(true)}
+                disabled={deleting}
+                className="rounded-xl bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 px-3.5 py-2 text-xs font-bold transition cursor-pointer disabled:opacity-50"
+              >
+                {deleting ? "刪除中…" : "刪除系列與所有影片"}
               </button>
             </div>
           </div>

@@ -112,12 +112,12 @@ export default function SeriesAssignModal({
     }
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(id: number, deleteVideos: boolean = false) {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await deleteSeries(id);
+      await deleteSeries(id, deleteVideos);
       setSeries((prev) => prev.filter((s) => s.id !== id));
       if (selectedId === id) setSelectedId(null);
       setConfirmingDeleteId(null);
@@ -216,54 +216,74 @@ export default function SeriesAssignModal({
           <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
             {series.map((s) => {
               const active = selectedId === s.id;
+              const isConfirming = confirmingDeleteId === s.id;
               return (
-                <div key={s.id} className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(s.id)}
-                    className={`flex flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition font-semibold cursor-pointer min-w-0 ${
-                      active
-                        ? "bg-accent text-neutral-950 font-bold"
-                        : "text-text-secondary hover:bg-surface-highest hover:text-text-primary"
-                    }`}
-                  >
-                    <span className="truncate">{s.name}</span>
-                    <span
-                      className={`font-mono text-[10px] shrink-0 ${
-                        active ? "text-neutral-950/70" : "text-text-tertiary"
-                      }`}
-                    >
-                      {s.count} 部
-                    </span>
-                  </button>
-                  {confirmingDeleteId === s.id ? (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(s.id)}
-                        disabled={busy}
-                        className="rounded-md bg-red-500 px-2 py-1 text-[10px] font-bold text-white transition hover:bg-red-400 disabled:opacity-50 cursor-pointer"
-                      >
-                        確定
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingDeleteId(null)}
-                        disabled={busy}
-                        className="rounded-md px-1.5 py-1 text-[10px] font-semibold text-text-tertiary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  ) : (
+                <div key={s.id} className="flex flex-col gap-1 rounded-lg">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setConfirmingDeleteId(s.id)}
-                      title="刪除系列（影片會保留，只是回到未分類）"
-                      className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-text-tertiary transition hover:text-red-400 cursor-pointer"
+                      onClick={() => setSelectedId(s.id)}
+                      className={`flex flex-1 items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition font-semibold cursor-pointer min-w-0 ${
+                        active
+                          ? "bg-accent text-neutral-950 font-bold"
+                          : "text-text-secondary hover:bg-surface-highest hover:text-text-primary"
+                      }`}
                     >
-                      刪除
+                      <span className="truncate">{s.name}</span>
+                      <span
+                        className={`font-mono text-[10px] shrink-0 ${
+                          active ? "text-neutral-950/70" : "text-text-tertiary"
+                        }`}
+                      >
+                        {s.count} 部
+                      </span>
                     </button>
+                    {!isConfirming && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDeleteId(s.id)}
+                        title="刪除系列"
+                        className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-text-tertiary transition hover:text-red-400 cursor-pointer"
+                      >
+                        刪除
+                      </button>
+                    )}
+                  </div>
+                  {isConfirming && (
+                    <div className="flex flex-col gap-1.5 rounded-lg border border-red-500/30 bg-red-500/5 p-2.5 my-1">
+                      <span className="text-[11px] font-bold text-text-primary">
+                        刪除系列「{s.name}」
+                      </span>
+                      <p className="text-[10px] text-text-tertiary font-sans">
+                        請選擇是否一併刪除包含的 {s.count} 部影片及本地檔案：
+                      </p>
+                      <div className="flex justify-end gap-1.5 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingDeleteId(null)}
+                          disabled={busy}
+                          className="rounded px-2 py-1 text-[10px] font-semibold text-text-tertiary transition hover:text-text-primary disabled:opacity-50 cursor-pointer"
+                        >
+                          取消
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(s.id, false)}
+                          disabled={busy}
+                          className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] font-bold text-amber-300 transition hover:bg-amber-500/20 disabled:opacity-50 cursor-pointer"
+                        >
+                          僅刪系列
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(s.id, true)}
+                          disabled={busy}
+                          className="rounded bg-red-500/20 border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-400 transition hover:bg-red-500/30 disabled:opacity-50 cursor-pointer"
+                        >
+                          刪除系列與影片
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               );
