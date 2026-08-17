@@ -90,6 +90,22 @@ export function streamUrl(videoId: number): string {
   return backendUrl(`/api/stream/${videoId}${query}`);
 }
 
+export function onlineStreamUrl(videoId: number): string {
+  const code = getAccessCode();
+  const query = code ? `?token=${encodeURIComponent(code)}` : "";
+  return backendUrl(`/api/stream/online/${videoId}${query}`);
+}
+
+export function isAnime1Url(url?: string | null): boolean {
+  if (!url) return false;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === "anime1.me" || host.endsWith(".anime1.me");
+  } catch {
+    return false;
+  }
+}
+
 // The URL to display a video's cover in an <img>/poster. Prefer the backend's
 // cached copy (served locally, survives a dead origin, and — like streaming —
 // carries the code as ?token= since <img> can send no header); the endpoint

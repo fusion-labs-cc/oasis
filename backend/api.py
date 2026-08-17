@@ -1492,3 +1492,120 @@ def stream_video(video_id: int, request: Request):
         status_code=status_code
     )
 
+
+_anime1_stream_cache: dict[int, dict] = {}
+
+
+def get_anime1_stream_info(page_url: str) -> tuple[str, dict]:
+    import urllib.parse
+    import requests
+    session = requests.Session()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'Referer': page_url,
+    }
+    r = session.get(page_url, headers=headers, timeout=10)
+    r.raise_for_status()
+    apireq = re.search(r'data-apireq="([^"]+)"', r.text)
+    if not apireq:
+        raise HTTPException(status_code=400, detail='無法取得 Anime1 影片 Token')
+
+    token = urllib.parse.unquote(apireq.group(1))
+    api_resp = session.post(
+        'https://v.anime1.me/api',
+        data={'d': token},
+        headers={'Referer': page_url},
+        timeout=10,
+    )
+    api_resp.raise_for_status()
+    data = api_resp.json()
+
+    if not data.get('s') or not data['s'][0].get('src'):
+        raise HTTPException(status_code=400, detail='Anime1 影片來源解析失敗')
+
+    src = data['s'][0]['src']
+    if src.startswith('//'):
+        src = 'https:' + src
+    elif not src.startswith('http'):
+        src = 'https://v.anime1.me' + src
+
+    cookies = api_resp.cookies.get_dict()
+    return src, cookies
+
+
+@app.get('/api/stream/online/{video_id}')
+def stream_online_video(video_id: int, request: Request):
+    """Proxy online video stream for site links (e.g. Anime1) without downloading to disk."""
+    record = catalog.get_video_by_id(video_id)
+    if not record or not record.get('url'):
+        raise HTTPException(status_code=404, detail='影片不存在')
+
+    url = record['url']
+
+    if 'anime1.me' in url.lower():
+        now = time.time()
+        cached = _anime1_stream_cache.get(video_id)
+        if cached and cached.get('expiry', 0) > now:
+            stream_url = cached['url']
+            cookies = cached['cookies']
+        else:
+            try:
+                stream_url, cookies = get_anime1_stream_info(url)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f'解析 Anime1 串流失敗: {e}')
+            _anime1_stream_cache[video_id] = {
+                'url': stream_url,
+                'cookies': cookies,
+                'expiry': now + 1800,
+            }
+
+        req_headers = {
+            'Referer': url,
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        }
+        range_header = request.headers.get('range')
+        if range_header:
+            req_headers['Range'] = range_header
+
+        try:
+            resp = requests.get(stream_url, headers=req_headers, cookies=cookies, stream=True, timeout=15)
+        except Exception:
+            _anime1_stream_cache.pop(video_id, None)
+            try:
+                stream_url, cookies = get_anime1_stream_info(url)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f'解析 Anime1 串流失敗: {e}')
+            _anime1_stream_cache[video_id] = {
+                'url': stream_url,
+                'cookies': cookies,
+                'expiry': now + 1800,
+            }
+            resp = requests.get(stream_url, headers=req_headers, cookies=cookies, stream=True, timeout=15)
+
+        def generate():
+            try:
+                for chunk in resp.iter_content(chunk_size=128 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                resp.close()
+
+        response_headers = {
+            'Accept-Ranges': 'bytes',
+            'Content-Type': resp.headers.get('Content-Type', 'video/mp4'),
+        }
+        if 'Content-Length' in resp.headers:
+            response_headers['Content-Length'] = resp.headers['Content-Length']
+        if 'Content-Range' in resp.headers:
+            response_headers['Content-Range'] = resp.headers['Content-Range']
+
+        return StreamingResponse(
+            generate(),
+            status_code=resp.status_code,
+            headers=response_headers,
+            media_type='video/mp4',
+        )
+
+    raise HTTPException(status_code=400, detail='此網站不支援線上串流播放')
+
+

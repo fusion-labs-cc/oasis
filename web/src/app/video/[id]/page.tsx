@@ -7,7 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import type Plyr from "plyr";
 import "plyr/dist/plyr.css";
-import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, fetchSeries, getYouTubeEmbedUrl, type SeriesRecord } from "@/lib/api";
+import { coverUrl, downloadVideo, cancelDownload, logPlay, updateVideoTags, updateVideoDetails, deleteVideo, openInPlayer, safeExternalHref, streamUrl, onlineStreamUrl, isAnime1Url, fetchSeries, getYouTubeEmbedUrl, type SeriesRecord } from "@/lib/api";
 import { useToast } from "@/components/Toast";
 import { useBackend } from "@/context/BackendContext";
 import { useVideos } from "@/context/VideoContext";
@@ -562,6 +562,7 @@ export default function VideoDetailPage() {
   }
 
   const youtubeEmbedUrl = getYouTubeEmbedUrl(video?.url);
+  const anime1Online = isAnime1Url(video?.url);
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 py-4 sm:px-6 md:px-8 md:py-6">
@@ -604,6 +605,28 @@ export default function VideoDetailPage() {
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               allowFullScreen
             />
+          </div>
+        </div>
+      ) : anime1Online ? (
+        <div
+          className={
+            theater
+              ? "theater relative left-1/2 w-screen -translate-x-1/2 bg-black"
+              : "player-shell overflow-hidden rounded-2xl bg-black shadow-2xl border border-border-hairline"
+          }
+        >
+          <div className={theater ? "mx-auto" : ""}>
+            <video
+              ref={videoRef}
+              controls
+              autoPlay={false}
+              onPlay={handlePlay}
+              className="mx-auto w-full aspect-video max-h-[calc(100dvh-8rem)] max-w-[calc((100dvh-8rem)*16/9)] outline-none"
+              src={mounted ? onlineStreamUrl(video.id!) : undefined}
+              poster={mounted ? (coverUrl(video) || undefined) : undefined}
+            >
+              您的瀏覽器不支援影片播放。
+            </video>
           </div>
         </div>
       ) : (
