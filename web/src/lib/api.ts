@@ -128,17 +128,12 @@ export function getVideoCategory(url?: string | null): "general" | "av" {
 export function getSiteName(url?: string | null): string {
   if (!url) return "";
   try {
-    const raw = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
-    const host = new URL(raw).hostname.toLowerCase();
+    const host = new URL(url).hostname.toLowerCase();
     if (host.includes("youtube") || host === "youtu.be") return "YouTube";
     if (host.includes("anime1")) return "Anime1";
     if (host.includes("jable")) return "Jable";
     if (host.includes("missav")) return "MissAV";
     if (host.includes("supjav")) return "SupJav";
-    const labels = host.replace(/^www\./, "").split(".");
-    if (labels[0]) {
-      return labels[0].charAt(0).toUpperCase() + labels[0].slice(1);
-    }
   } catch {
     // ignore
   }

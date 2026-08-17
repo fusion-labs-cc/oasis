@@ -192,26 +192,10 @@ export default function VideoCard({
 
       <div className="flex flex-1 flex-col p-4">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5">
             <Link href={`/video/${video.id}`} className="font-mono text-xs font-bold text-accent hover:underline">
               {video.code}
             </Link>
-            {(() => {
-              const category = getVideoCategory(video.url);
-              const siteName = getSiteName(video.url);
-              if (!siteName) return null;
-              return (
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[9px] font-mono font-bold border ${
-                    category === "general"
-                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                      : "bg-purple-500/10 text-purple-400 border-purple-500/20"
-                  }`}
-                >
-                  {siteName}
-                </span>
-              );
-            })()}
           </div>
           <div className="flex items-center gap-1.5 min-w-0 max-w-[65%] justify-end text-xs font-semibold text-text-secondary">
             {video.actress && (
