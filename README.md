@@ -10,7 +10,7 @@ Oasis 是一個**你自己架、自己用**的個人謎片收藏中心與下載�
 
 支援從多個謎片網站解析與下載（並持續擴充支援的網站），結合 Python 爬蟲後端與 Next.js 網頁前端，提供網址解析、自動翻譯、下載、手動新增、標籤與演員分類管理，到串流或本機播放器播放的一站式體驗。
 
-> **English**: Oasis is a self-hosted personal adult video (AV) collection manager & downloader. The web UI ([oasis.fusion-labs.cc](https://oasis.fusion-labs.cc)) is publicly hosted, but scraping, downloading, and your database all run on your own machine — nothing leaves your disk. Supports auto-parsing, translation, and one-click downloading from Jable, MissAV, and SupJav.
+> **English**: Oasis is a self-hosted personal adult video (AV) collection manager & downloader. The web UI ([oasis.fusion-labs.cc](https://oasis.fusion-labs.cc)) is publicly hosted, but scraping, downloading, and your database all run on your own machine — nothing leaves your disk. Supports auto-parsing, translation, and one-click downloading from Jable, MissAV, SupJav, XVideos, and Anime1.
 
 > ⚠️ **內容性質**：本工具內建的站台 adapter 多數針對的是**成人謎片網站**（見下方〈支援的網站〉，其中 Anime1 為動畫網站）。若要使用成人網站的 adapter，請確認你已達所在地區法定成年年齡，且下載、觀看該類內容合法，再使用本工具。
 
@@ -129,6 +129,8 @@ chmod +x oasis-portal.sh
 
 這些是隨版本內建的 adapter（`backend/sites/*.json`），可以直接貼網址自動解析番號、演員、標籤、封面並下載。
 
+**XVideos 的番號是自動編號**：該站的影片標題由上傳者自由填寫，沒有可用的番號，因此收藏庫會依加入順序自動給號（`XV-01`、`XV-02`⋯）。同一支影片重新分析仍會沿用原本的號碼，不會重複新增一筆。
+
 **Anime1 支援整季批次**：貼上單集網址就只加那一集；貼上該部動畫的**分類頁**（例如 `anime1.me/category/<季度>/<動畫名>`），會一次把整季每一集都加進收藏庫，按「分析並下載」則全部排入下載佇列，逐集依序下載，每集可各自取消。
 
 **其他網站也能收藏，只是不會自動解析／下載。** 在網頁介面按「新增影片」→「手動新增」，自己填標題、番號、演員、標籤與封面圖，就能把任何網址記錄進收藏庫；要幫該網站做到跟上面一樣的自動解析／下載，需要自己寫一份 adapter，做法看 [DEVELOPMENT.md](./DEVELOPMENT.md#站台-adapter-設定-site-adapters)。
@@ -151,7 +153,7 @@ chmod +x oasis-portal.sh
 
 ## ⚠️ 免責聲明 (Disclaimer)
 
-本工具內建的站台 adapter 中，Jable、MissAV、SupJav 為**成人影片（A 片）網站**，其相關功能僅供已達所在地區法定成年年齡、且該地區法律允許之使用者使用；Anime1 為動畫網站。除此之外，本工具是通用的個人影音管理引擎，不內建其他任何特定網站的定義；使用者自行新增的站台 adapter 由使用者自己提供與維護。
+本工具內建的站台 adapter 中，Jable、MissAV、SupJav、XVideos 為**成人影片（A 片）網站**，其相關功能僅供已達所在地區法定成年年齡、且該地區法律允許之使用者使用；Anime1 為動畫網站。除此之外，本工具是通用的個人影音管理引擎，不內建其他任何特定網站的定義；使用者自行新增的站台 adapter 由使用者自己提供與維護。
 
 使用者須自負其設定與使用行為，並遵守目標網站的服務條款與當地法律。
 
