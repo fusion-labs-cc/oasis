@@ -12,8 +12,9 @@ import re
 import time
 from urllib.parse import unquote, urlparse, urljoin
 
-# Where user-supplied adapters live. Kept out of version control so the shipped
-# tool carries no built-in site definitions.
+# Where adapters live. The shipped ones are tracked in git and travel with a
+# release; in a frozen build OASIS_SITES_DIR points at a writable copy next to
+# the executable, so a user's own adapters survive an update.
 ADAPTERS_DIR = os.environ.get('OASIS_SITES_DIR') or os.path.join(
     os.path.abspath(os.path.dirname(__file__)), 'sites'
 )
