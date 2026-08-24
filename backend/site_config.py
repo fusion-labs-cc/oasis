@@ -1,10 +1,8 @@
-# Generic site-adapter engine.
+# Site-adapter engine.
 #
-# This module contains NO site-specific logic. Each site the user wants to use
-# is described by a JSON "adapter" file the user supplies in the adapters
-# directory (backend/sites/ by default, or $OASIS_SITES_DIR). The engine loads
-# those adapters and drives Selenium/scraping purely from their configuration,
-# so the shipped code stays a neutral, general-purpose page reader. See
+# Each supported site is described by a JSON "adapter" in the adapters directory
+# (backend/sites/ by default, or $OASIS_SITES_DIR). The engine loads those
+# adapters and drives Selenium/scraping from their configuration. See
 # sites.example.json for the adapter schema.
 import json
 import os

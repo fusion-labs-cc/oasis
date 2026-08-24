@@ -84,7 +84,7 @@ In-memory queue state is volatile, so the durable source of truth is the **`down
 
 ### Site adapters
 
-The shipped code contains **no site-specific logic by design**. `site_config.py` is a generic engine driven entirely by JSON adapters (CSS selectors, m3u8 extraction rules, required headers, Selenium options). Adapters live in `backend/sites/*.json`; the schema is documented in `backend/sites.example.json`. Keep it that way — site-specific behaviour belongs in an adapter, not in Python.
+`site_config.py` drives Selenium/scraping from JSON adapters (CSS selectors, m3u8 extraction rules, required headers, Selenium options). Adapters live in `backend/sites/*.json`; the schema is documented in `backend/sites.example.json`. Express a new site's behaviour as adapter config rather than a Python branch wherever the schema can carry it — `catalog.py`'s `adapter.get('id') == 'youtube'` special-cases are the exceptions that already exist, not a pattern to extend.
 
 Three details worth knowing:
 
@@ -99,7 +99,7 @@ Three optional adapter blocks bend the one-URL-one-HLS-video assumption the engi
 
   **`sequence` is the rule for any new site whose code has to be generated** — reach for it before inventing a scheme, and note the two constraints it already solves. It keeps the catalog's `AAA-123` shape: `min_digits: 2` / `max_digits: 5` zero-pad the number so `XV-01` satisfies `CODE_PATTERN` from the very first video, and past the cap it returns `None` for the caller's fallback chain rather than silently widening. And it is **idempotent**, which a bare counter is not: `insert_video` upserts on `code`, so `next_adapter_sequence_code()` looks the URL up and reuses the number already stored for it — otherwise re-analysing a video files it as a *second row* instead of updating the first. It is wired into single-video analysis only; `process_listing_url()` does not allocate numbers.
 
-  Don't add another `next_<site>_code()` in Python — `next_youtube_code()` (`YT-1`) and `next_manual_code()` (`MANUAL-1`) predate the generic path and are kept only for the codes already in users' databases. Both are unpadded and neither is URL-idempotent, so neither is a model to copy.
+  Don't add another `next_<site>_code()` in Python — `next_youtube_code()` (`YT-1`) and `next_manual_code()` (`MANUAL-1`) predate the adapter-driven path and are kept only for the codes already in users' databases. Both are unpadded and neither is URL-idempotent, so neither is a model to copy.
 - **`media`** — a **second download pipeline** for sites serving one progressive MP4 rather than an HLS playlist (`media.mode: "http"`; absent ⇒ `"hls"`). These players keep no media URL in the page at all: the markup holds an opaque, time-limited token, and an API call exchanges it for the URL *and* sets cookies the CDN then demands — which is why `get_media_source()` returns cookies alongside the URL, and why the token is read fresh at download time instead of being remembered from the analysis pass. `post.decode_value` exists because such a token is usually already percent-encoded; form-encoding it a second time escapes the escapes and the signature arrives corrupt.
 
 The download pipeline (`download.py`) branches on `media_mode(adapter)`. Both paths start the same — `detect_site` → Selenium extracts the title — then:

@@ -47,7 +47,7 @@ Light 更新失敗不會動到硬碟上任何東西，會自動退回走 Full；
 
 ## 🧩 站台 Adapter 設定 (Site Adapters)
 
-本工具是一個**通用的網頁讀取／下載引擎，本身不內建任何特定網站的定義**——README 提到的支援網站也只是幾份 JSON 設定檔。要讓解析或下載支援新的網站，需自行提供一份該網站的「adapter」設定檔：
+每個支援的網站都是一份 JSON「adapter」設定檔，放在 `backend/sites/`。要讓解析或下載支援新的網站，就再加一份：
 
 1. 參考 `backend/sites.example.json`，它記錄了 adapter 的完整格式（網域比對規則、標題／標籤的 CSS 選擇器、m3u8 擷取方式、必要的 HTTP 標頭等）。
 2. 複製一份到 `backend/sites/<你的站台>.json` 並填入對應設定。
@@ -97,7 +97,7 @@ oasis/
 │   ├── encode.py             # FFmpeg 轉檔模組
 │   ├── catalog.py            # 元數據刮削與 SQLite 資料庫操作
 │   ├── requirements.txt      # Python 套件依賴清單
-│   ├── site_config.py        # 通用站台 adapter 引擎（不含任何內建站台定義）
+│   ├── site_config.py        # 站台 adapter 引擎（讀取 sites/ 下的設定檔）
 │   ├── sites.example.json    # 站台 adapter 範本（記錄設定格式）
 │   └── sites/                # 站台 adapter（JSON）；可依 sites.example.json 增修
 ├── web/                      # Next.js 前端 App (TypeScript + Tailwind)
