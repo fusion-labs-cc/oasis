@@ -134,6 +134,7 @@ export function getSiteName(url?: string | null): string {
     if (host.includes("jable")) return "Jable";
     if (host.includes("missav")) return "MissAV";
     if (host.includes("supjav")) return "SupJav";
+    if (host.includes("xvideos")) return "XVideos";
   } catch {
     // ignore
   }

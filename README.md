@@ -124,6 +124,7 @@ chmod +x oasis-portal.sh
 | [Jable](https://jable.tv) | `jable.tv` | ✅ |
 | [MissAV](https://missav.ws) | `missav.*` | ✅ |
 | [SupJav](https://supjav.com) | `supjav.*` | ✅ |
+| [XVideos](https://www.xvideos.com) | `xvideos.*` | ✅ |
 | [Anime1](https://anime1.me) | `anime1.me` | ✅ 支援整季批次 |
 
 這些是隨版本內建的 adapter（`backend/sites/*.json`），可以直接貼網址自動解析番號、演員、標籤、封面並下載。

@@ -30,9 +30,11 @@
   "headers": {
     "Referer": "{page_url}"
   },
+  "_comment_driver": "accept_language asks the site to serve the page in this language. Set it when the site machine-translates its own titles/tags: left unset the scraper reads whatever Chrome's default locale gets, and catalog.py then translates that translation.",
   "driver": {
     "performance_log": false,
-    "stealth": false
+    "stealth": false,
+    "accept_language": ""
   },
   "wait": {
     "seconds": 2,
@@ -87,10 +89,14 @@
     "max_pages": 20
   },
 
-  "_comment_code": "OPTIONAL. Builds the catalog's UNIQUE code from the URL (from: 'title' matches the title instead). Needed when the site's titles carry no studio code: the fallback is the title's first 20 characters, which is identical for every episode of one series, so they would overwrite each other. {1}, {2}… are the pattern's capture groups.",
+  "_comment_code": "OPTIONAL. Builds the catalog's UNIQUE code from the URL (from: 'title' matches the title instead; from: 'sequence' hands out PREFIX-1, PREFIX-2 … from the catalog itself, for sites carrying no id that fits the AAA-123 shape — it reuses the number already stored for the URL, so re-analysing updates the row rather than adding a second, and it applies to single-video analysis only). Needed when the site's titles carry no studio code: the fallback is the title's first 20 characters, which is identical for every episode of one series, so they would overwrite each other. {1}, {2}… are the pattern's capture groups.",
   "code": {
     "from": "url",
     "pattern": "example\\.com/(\\d+)",
-    "template": "EX-{1}"
+    "template": "EX-{1}",
+    "_comment_sequence": "from: 'sequence' ignores pattern/template and uses these instead:",
+    "prefix": "EX",
+    "min_digits": 2,
+    "max_digits": 5
   }
 }

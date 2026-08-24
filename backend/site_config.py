@@ -552,6 +552,16 @@ def setup_driver_for_site(options, adapter: dict):
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_experimental_option('excludeSwitches', ['enable-automation', 'enable-logging'])
         options.add_experimental_option('useAutomationExtension', False)
+    lang = driver_cfg.get('accept_language')
+    if lang:
+        # Sites that machine-translate their own metadata choose the language
+        # from Accept-Language. Left at Chrome's default the scraper reads a
+        # title already rendered into English, and catalog.py then translates
+        # that translation — so the adapter states which language it wants the
+        # page served in. The pref is what sets the header; --lang aligns the
+        # renderer's locale with it for pages that read navigator.language.
+        options.add_experimental_option('prefs', {'intl.accept_languages': lang})
+        options.add_argument('--lang=' + lang.split(',')[0])
     return options
 
 

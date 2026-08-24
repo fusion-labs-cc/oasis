@@ -1,0 +1,56 @@
+{
+  "id": "xvideos",
+  "name": "XVideos",
+  "category": "av",
+  "display_domain": "xvideos.com",
+  "domain_prefixes": [
+    "xvideos"
+  ],
+
+  "_comment_title": "No title_selectors on purpose: the only element holding the title is h2.page-title, which also wraps the duration and quality badges in child spans, and Selenium's .text folds them into the name ('… 12 min1080p'). The <title> tag carries the title alone, so the suffix-strip fallback is the accurate path here. Longest suffix first — the strip splits on the first one that matches.",
+  "title_selectors": [],
+  "title_suffix_strip": [
+    " - XVIDEOS.COM",
+    " - XVIDEOS"
+  ],
+
+  "tag_selectors": [
+    ".video-tags-list a.is-keyword"
+  ],
+
+  "_comment_actress": "Scoped to li.model and to span.name: the same list holds the uploader (li.main-uploader) with an identical span.name, and each <a> also contains a subscriber count that .text on the link would append to the name.",
+  "actress_selectors": [
+    ".video-tags-list li.model span.name"
+  ],
+
+  "headers": {
+    "Referer": "{page_url}",
+    "Origin": "https://www.xvideos.com"
+  },
+  "_comment_driver": "accept_language is load-bearing, not cosmetic: xvideos serves its own machine translation of the uploader's title based on this header, so Chrome's default (en-US) yields an English rendering that catalog.py would then translate again. Asked in zh-TW the page returns the original title, which is_zh_tw() recognises and passes through untranslated.",
+  "driver": {
+    "stealth": true,
+    "accept_language": "zh-TW,zh"
+  },
+  "wait": {
+    "seconds": 2,
+    "css": "h2.page-title",
+    "timeout": 15
+  },
+
+  "_comment_m3u8": "The master playlist sits in an inline html5player.setVideoHLS(...) call in the initial HTML, so no player interaction, iframe scan or performance log is needed. The named form is matched first because the URL's signature segment ends in '==,<expiry>' and a bare .m3u8 sweep would also pick up anything a future page template adds; the generic pattern stays as a fallback if the JS API is renamed.",
+  "m3u8": {
+    "regexes": [
+      "setVideoHLS\\('(https?://[^']+\\.m3u8[^']*)'",
+      "https?://[^\\s\"']+\\.m3u8[^\\s\"']*"
+    ]
+  },
+
+  "_comment_code": "xvideos titles are freeform uploader text, not studio codes: CODE_PATTERN never matches them (even a real 'AN9-011' fails it — the prefix carries a digit), so every record would fall back to full_title[:20], which collides on a site where near-identical titles are routine. Nothing on the page fits the AAA-123 shape either — the path is an obfuscated slug (/video.udeftkf4e9e/) and the page's own id_video is 8 digits wide — so the number is the catalog's own, handed out in order. next_adapter_sequence_code() reuses the number already stored for this URL before minting a new one, so re-analysing a video still updates its row instead of adding a second.",
+  "code": {
+    "from": "sequence",
+    "prefix": "XV",
+    "min_digits": 2,
+    "max_digits": 5
+  }
+}

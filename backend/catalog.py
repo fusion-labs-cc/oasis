@@ -857,7 +857,8 @@ def _start_scrape_driver(adapter: dict):
 def fetch_page_metadata(url: str) -> tuple:
     """
     Fetch the video title and tags from the page without downloading the video.
-    Returns (title, raw_tags) where raw_tags is a list of tag strings from the DOM.
+    Returns (title, raw_tags, cover_url, actress); raw_tags is a list of tag
+    strings from the DOM.
     """
     global _active_driver
     from site_config import detect_site, get_cover_url, get_video_actress, get_video_name, get_video_tags, wait_for_page_load
@@ -941,7 +942,9 @@ def process_url(url: str, skip_download: bool = False):
         actress = None
         code = next_youtube_code()
     else:
-        code = derive_code(url, adapter, full_title) or extract_code(full_title)
+        code = (derive_code(url, adapter, full_title)
+                or next_adapter_sequence_code(adapter, url)
+                or extract_code(full_title))
         actress = page_actress or extract_actress(full_title, code)
 
 
@@ -1190,6 +1193,58 @@ def process_listing_url(url: str) -> list[dict]:
         raise ValueError('列表頁的項目都無法解析')
     print(f'\n💾 已寫入 {len(records)} 筆記錄')
     return records
+
+
+def next_adapter_sequence_code(adapter: dict, url: str) -> str | None:
+    """Hand out the next PREFIX-<n> code for adapters using code.from "sequence".
+
+    For sites that key a video on nothing a code can be built from — the URL
+    holds an obfuscated slug and the page's own id is far wider than the
+    AAA-123 shape the rest of the catalog reads in. The number is the catalog's,
+    not the site's, so it stays short by construction.
+
+    The URL is looked up first, and that lookup is the whole reason this is not
+    a bare counter: insert_video upserts on code, so minting a fresh number on
+    every pass would file a re-analysed video as a second row instead of
+    updating the first. Reusing the number already stored for this URL is what
+    gives a sequence the same idempotence a derived code gets for free.
+
+    Returns None when the adapter did not ask for a sequence, or once max_digits
+    is exhausted — both leave the caller's fallback chain to decide, rather than
+    silently widening past the shape the adapter asked for.
+    """
+    cfg = adapter.get('code') or {}
+    if cfg.get('from') != 'sequence':
+        return None
+    prefix = cfg.get('prefix') or (adapter.get('id') or 'SEQ').upper()
+    min_digits = int(cfg.get('min_digits') or 2)
+    max_digits = int(cfg.get('max_digits') or 5)
+
+    conn = get_connection()
+    try:
+        if url:
+            row = conn.execute(
+                "SELECT code FROM videos WHERE url = ? ORDER BY id LIMIT 1", (url,)
+            ).fetchone()
+            if row and row['code']:
+                return row['code']
+        rows = conn.execute(
+            "SELECT code FROM videos WHERE code LIKE ?", (prefix + '-%',)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    pattern = re.compile(r'^%s-(\d+)$' % re.escape(prefix))
+    max_n = 0
+    for row in rows:
+        m = pattern.match(row['code'] or '')
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+
+    nxt = max_n + 1
+    if len(str(nxt)) > max_digits:
+        return None
+    return f'{prefix}-{nxt:0{min_digits}d}'
 
 
 def next_youtube_code() -> str:
