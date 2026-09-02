@@ -173,19 +173,59 @@ def has_japanese_kana(text: str) -> bool:
     return bool(re.search(r'[぀-ゟ゠-ヿ]', text or ''))
 
 
-def translate_to_zh_tw(text: str) -> str:
+# deep-translator scrapes translate.google.com rather than calling an API, so a
+# 5xx there does not raise: the error page's *own text* comes back as if it were
+# the translation, and lands in title_zh_tw as the video's title. Content is the
+# only signal we get, so match the page's wording.
+_TRANSLATE_ERROR_MARKERS = (
+    "that's an error",
+    "that\u2019s an error",
+    "server error",
+    "please try again later",
+    "that's all we know",
+    "that\u2019s all we know",
+)
+
+
+def _is_translation_garbage(result: str, source: str) -> bool:
+    """True if the translator handed back an error page instead of a
+    translation. The source is checked too, so a video genuinely titled
+    "That's an error" is not mistaken for a failure forever."""
+    if not result:
+        return True
+    low, src = result.lower(), (source or '').lower()
+    return any(m in low and m not in src for m in _TRANSLATE_ERROR_MARKERS)
+
+
+TRANSLATE_ATTEMPTS = 3
+
+
+def translate_to_zh_tw(text: str, attempts: int = TRANSLATE_ATTEMPTS) -> str:
     """Translate to Traditional Chinese using deep-translator. Source is
     auto-detected: titles arrive in Japanese (jable/missav) or Simplified
-    Chinese (supjav), and a hardcoded 'ja' source mistranslates the latter."""
+    Chinese (supjav), and a hardcoded 'ja' source mistranslates the latter.
+
+    Retries a transient failure — Google 5xx-es often enough that a single shot
+    poisons a title permanently, and the analysis it belongs to is far too
+    expensive to redo for a one-second network blip. Returns the text untouched
+    when every attempt fails, so the caller stores the original rather than an
+    error page."""
     if not text:
         return ''
-    try:
-        from deep_translator import GoogleTranslator
-        result = GoogleTranslator(source='auto', target='zh-TW').translate(text)
-        return result or text
-    except Exception as e:
-        print(f'⚠️  翻譯失敗: {e}')
-        return text
+    import time
+    for attempt in range(1, attempts + 1):
+        try:
+            from deep_translator import GoogleTranslator
+            result = GoogleTranslator(source='auto', target='zh-TW').translate(text)
+            if result and not _is_translation_garbage(result, text):
+                return result
+            print(f'⚠️  翻譯回應無效（第 {attempt}/{attempts} 次）')
+        except Exception as e:
+            print(f'⚠️  翻譯失敗（第 {attempt}/{attempts} 次）: {e}')
+        if attempt < attempts:
+            time.sleep(1.5 * attempt)
+    print('⚠️  翻譯重試已用盡，保留原文')
+    return text
 
 
 def translate_tags_to_zh_tw(tags: list[str]) -> list[str]:
